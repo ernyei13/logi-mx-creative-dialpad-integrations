@@ -1,4 +1,14 @@
-import hid
+try:
+    import hid
+except Exception as e:
+    hint = (
+        "\nUnable to import the native HID library. This often happens when you're\n"
+        "running a different Python interpreter (e.g. Conda) than your project venv.\n"
+        "Try running with the project's venv: `./venv/bin/python host.py`\n"
+        "Or install the native lib on macOS: `brew install hidapi` and then\n"
+        "reinstall the Python package in the active venv: `./venv/bin/python -m pip install --force-reinstall hid`\n"
+    )
+    raise ImportError(str(e) + hint)
 import time
 import sys
 import asyncio
@@ -17,6 +27,16 @@ WEB_PORT = 8080
 LOOP = None
 # Queue used to send outgoing payloads from HID thread -> asyncio loop -> websocket
 SEND_QUEUE = None
+# Button mapping for byte index 1 (bitmask values)
+# top left, top right, bottom left, bottom right
+BUTTON_BIT_MAP = {
+    0x08: 'TOP LEFT',
+    0x10: 'TOP RIGHT',
+    0x20: 'BOTTOM LEFT',
+    0x40: 'BOTTOM RIGHT',
+}
+# remember previous state of byte 1 to detect presses/releases
+LAST_BTN_BYTE1 = 0
 
 # ==============================================================================
 # 2. EMBEDDED WEB INTERFACE (HTML/CSS/JS)
@@ -275,20 +295,27 @@ def process_data(data):
     2. Sends data to Web Visualizer.
     """
     if not data: return
-    
+
+    # normalize to a sequence of ints
+    try:
+        seq = list(data)
+    except Exception:
+        # fallback if data is some custom type
+        seq = [int(x) for x in data]
+
     timestamp = time.strftime("%H:%M:%S", time.localtime())
-    report_id = data[0]
+    report_id = seq[0]
 
     # =========================================================================
     # REPORT ID 02: Standard Mode
     # =========================================================================
     if report_id == 0x02:
-        if len(data) < 8: return
-        
+        if len(seq) < 8: return
+
         # --- SWAPPED MAPPING ---
-        raw_small = data[6]  # Byte 6 -> SMALL SCROLLER
-        raw_big   = data[7]  # Byte 7 -> BIG DIAL
-        
+        raw_small = seq[6]  # Byte 6 -> SMALL SCROLLER
+        raw_big   = seq[7]  # Byte 7 -> BIG DIAL
+
         val_small = get_signed_int(raw_small)
         val_big   = get_signed_int(raw_big)
 
@@ -312,14 +339,38 @@ def process_data(data):
             # 2. Web Visualizer (send to remote receiver)
             broadcast_to_web("BIG", val_big)
 
+        # Handle index 1 button bits (top/bottom left/right)
+        global LAST_BTN_BYTE1
+        btn_byte = seq[1] if len(seq) > 1 else 0
+        changed = btn_byte ^ LAST_BTN_BYTE1
+        if changed:
+            for bit, name in BUTTON_BIT_MAP.items():
+                if changed & bit:
+                    state = bool(btn_byte & bit)
+                    action = 'PRESSED' if state else 'RELEASED'
+                    print(f"[{timestamp}] BUTTON        | {name:<12} | {action}")
+        LAST_BTN_BYTE1 = btn_byte
+
+        # Log any other non-zero bytes (raw) so we can see button presses
+        handled = {0, 1, 6, 7}
+        raw_items = []
+        for i, b in enumerate(seq):
+            if i in handled:
+                continue
+            if b != 0:
+                raw_items.append(f"[{i}]=0x{b:02x} ({get_signed_int(b)})")
+
+        if raw_items:
+            print(f"[{timestamp}] RAW OTHER     | {' '.join(raw_items)}")
+
     # =========================================================================
     # REPORT ID 11: Vendor Mode (Fallback)
     # =========================================================================
     elif report_id == 0x11:
-        if len(data) < 6: return
-        control_id = data[4]
-        val = get_signed_int(data[5])
-        
+        if len(seq) < 6: return
+        control_id = seq[4]
+        val = get_signed_int(seq[5])
+
         if control_id == 0x01 and val != 0:
             # 1. Terminal Log
             direction = "RIGHT (CW)" if val > 0 else "LEFT (CCW)"
@@ -328,6 +379,18 @@ def process_data(data):
 
             # 2. Web Visualizer (send to remote receiver)
             broadcast_to_web("BIG", val)
+
+        # For other control IDs or bytes, print raw data for debugging/visibility
+        handled = {0, 4, 5}
+        raw_items = []
+        for i, b in enumerate(seq):
+            if i in handled:
+                continue
+            if b != 0:
+                raw_items.append(f"[{i}]=0x{b:02x} ({get_signed_int(b)})")
+
+        if raw_items:
+            print(f"[{timestamp}] RAW VENDOR    | ctrl=0x{control_id:02x} | {' '.join(raw_items)}")
 
 def scan_interfaces():
     print("\nScanning for MX Creative / Dialpad Interfaces...")
@@ -364,19 +427,77 @@ def hid_listener_thread(device_path):
     """Background thread that runs the HID blocking loop"""
     print(f"[*] HID Thread Started for {device_path}")
     try:
-        h = hid.device()
-        h.open_path(device_path)
-        h.set_nonblocking(False) # We can use blocking here since we are in a thread!
+        # The `hid` package has different bindings depending on which
+        # implementation was installed. Detect and adapt to either:
+        # - Cython binding: exposes `hid.device()` with `open_path()` etc.
+        # - ctypes binding: exposes `Device` class and `enumerate()` function.
+        if hasattr(hid, 'device'):
+            # Cython-style API
+            h = hid.device()
+            try:
+                h.open_path(device_path)
+            except Exception:
+                # try decoding bytes path if needed
+                if isinstance(device_path, bytes):
+                    h.open_path(device_path.decode())
+                else:
+                    raise
+            try:
+                # Some bindings call this `set_nonblocking`, others may
+                # accept numeric values. Try both.
+                h.set_nonblocking(False)
+            except Exception:
+                try:
+                    h.set_nonblocking(0)
+                except Exception:
+                    pass
 
-        while True:
-            # Read with a timeout so the thread can be killed if needed
-            data = h.read(64, timeout_ms=1000) 
-            if data:
-                process_data(data)
-            
-            # Tiny sleep not strictly necessary with blocking read, 
-            # but good for CPU safety if device spams
-            time.sleep(0.001) 
+            while True:
+                # Try the common signatures for cython binding read
+                data = None
+                try:
+                    data = h.read(64, timeout_ms=1000)
+                except TypeError:
+                    try:
+                        data = h.read(64, 1000)
+                    except Exception:
+                        data = h.read(64)
+
+                if data:
+                    process_data(data)
+
+                time.sleep(0.001)
+        else:
+            # ctypes-style API (the `Device` class)
+            # The ctypes Device expects `path` argument in the constructor.
+            # Accept either bytes or str paths; the ctypes layer will handle it.
+            if isinstance(device_path, bytes):
+                path_arg = device_path
+            else:
+                path_arg = device_path
+
+            h = hid.Device(path=path_arg)
+            # Use property setter to set blocking/non-blocking
+            try:
+                h.nonblocking = False
+            except Exception:
+                pass
+
+            while True:
+                # ctypes Device.read signature is read(size, timeout=None)
+                try:
+                    data = h.read(64, timeout=1000)
+                except TypeError:
+                    # fallback if implementation expects positional timeout
+                    try:
+                        data = h.read(64, 1000)
+                    except Exception:
+                        data = h.read(64)
+
+                if data:
+                    process_data(data)
+
+                time.sleep(0.001)
 
     except IOError as e:
         print(f"[-] HID Error: {e}")
