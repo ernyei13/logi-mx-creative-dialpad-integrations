@@ -1,0 +1,37 @@
+<?xml version="1.0" encoding="UTF-8" standalone="no"?>
+<ExtensionManifest ExtensionBundleId="com.logi.receiver.bundle" ExtensionBundleName="Logi Receiver" ExtensionBundleVersion="1.0.0" Version="13.0">
+    <Author>Logi MX Creative</Author>
+    <ExtensionList>
+        <Extension Id="com.logi.receiver" Version="1.0.0"/>
+    </ExtensionList>
+    <ExecutionEnvironment>
+        <HostList>
+            <Host Name="AEFT" Version="25.0" />
+        </HostList>
+        <LocaleList>
+            <Locale Code="All"/>
+        </LocaleList>
+        <RequiredRuntimeList>
+            <RequiredRuntime Name="CSXS" Version="13.0"/>
+        </RequiredRuntimeList>
+    </ExecutionEnvironment>
+    <DispatchInfoList>
+        <Extension Id="com.logi.receiver">
+            <DispatchInfo>
+                <Resources>
+                    <MainPath>./index.html</MainPath>
+                </Resources>
+                <UI>
+                    <Type>Panel</Type>
+                    <Menu>Logi Receiver</Menu>
+                    <Geometry>
+                       <Size>
+                         <Height>400</Height>
+                         <Width>500</Width>
+                       </Size>
+                    </Geometry>
+                </UI>
+            </DispatchInfo>
+        </Extension>
+    </DispatchInfoList>
+</ExtensionManifest>

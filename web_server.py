@@ -1,8 +1,67 @@
 import asyncio
 import json
+import time
+import os
 from aiohttp import web
 
 WEB_PORT = 8080
+COMMAND_FILE = "C:/temp/logi_command.json"
+POSITION_FILE = "C:/temp/logi_position.json"
+
+# Ensure temp directory exists
+os.makedirs(os.path.dirname(COMMAND_FILE), exist_ok=True)
+
+# Global state for tracking slider and accumulated position
+last_slider_state = {
+    "delta": 0,
+    "ctrl": "unknown"
+}
+
+# Accumulated position offsets
+accumulated_position = {
+    "x": 0,
+    "y": 0
+}
+
+# Button states
+button_states = {
+    "TOP LEFT": False,
+    "TOP RIGHT": False,
+    "BOTTOM LEFT": False,
+    "BOTTOM RIGHT": False
+}
+
+
+def write_command_file(delta, ctrl="BIG"):
+    """Write command to file for ExtendScript to read"""
+    try:
+        cmd = {
+            "delta": delta,
+            "ctrl": ctrl,
+            "timestamp": time.time()
+        }
+        with open(COMMAND_FILE, 'w') as f:
+            json.dump(cmd, f)
+        print(f"[*] Wrote command: delta={delta}")
+    except Exception as e:
+        print(f"[!] Error writing command file: {e}")
+
+
+def write_position_file(delta, ctrl="BIG"):
+    """Write accumulated position to file for AE expression to read"""
+    global accumulated_position
+    try:
+        # Accumulate based on control type
+        if ctrl == "BIG":
+            accumulated_position["x"] += delta
+        else:
+            accumulated_position["y"] += delta
+        
+        with open(POSITION_FILE, 'w') as f:
+            json.dump(accumulated_position, f)
+        print(f"[*] Position: x={accumulated_position['x']}, y={accumulated_position['y']}")
+    except Exception as e:
+        print(f"[!] Error writing position file: {e}")
 
 # Keep small and self-contained: copy of the HTML UI used previously
 HTML_CONTENT = """
@@ -143,6 +202,43 @@ HTML_CONTENT = """
         }
         .active .value { color: var(--accent); text-shadow: 0 0 15px rgba(59, 130, 246, 0.5); }
 
+        /* --- BUTTON GRID --- */
+        .button-grid {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 10px;
+            width: 140px;
+        }
+        
+        .hw-button {
+            width: 60px;
+            height: 60px;
+            background: linear-gradient(145deg, #1a1a1a, #0f0f0f);
+            border: 2px solid #333;
+            border-radius: 8px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 0.6rem;
+            color: var(--text-dim);
+            text-transform: uppercase;
+            letter-spacing: 1px;
+            transition: all 0.1s ease;
+            box-shadow: 
+                0 4px 6px rgba(0,0,0,0.4),
+                inset 0 1px 0 rgba(255,255,255,0.05);
+        }
+        
+        .hw-button.pressed {
+            background: linear-gradient(145deg, #0a0a0a, #151515);
+            border-color: var(--accent);
+            color: var(--accent);
+            box-shadow: 
+                0 0 20px rgba(59, 130, 246, 0.3),
+                inset 0 2px 4px rgba(0,0,0,0.5);
+            transform: translateY(2px);
+        }
+
     </style>
 </head>
 <body>
@@ -150,6 +246,18 @@ HTML_CONTENT = """
     <div class="header">MX Creative Interface</div>
 
     <div class="stage">
+        <div id="group-buttons">
+            <div class="button-grid">
+                <div class="hw-button" id="btn-tl">Top<br>Left</div>
+                <div class="hw-button" id="btn-tr">Top<br>Right</div>
+                <div class="hw-button" id="btn-bl">Bot<br>Left</div>
+                <div class="hw-button" id="btn-br">Bot<br>Right</div>
+            </div>
+            <div class="meta">
+                <div class="label">Buttons</div>
+            </div>
+        </div>
+
         <div id="group-big">
             <div class="dial-container">
                 <div class="dial-ring" id="dial-visual">
@@ -194,11 +302,34 @@ HTML_CONTENT = """
         const valSmall = document.getElementById('val-small');
         const groupBig = document.getElementById('group-big');
         const groupSmall = document.getElementById('group-small');
+        
+        // Button elements
+        const buttons = {
+            'TOP LEFT': document.getElementById('btn-tl'),
+            'TOP RIGHT': document.getElementById('btn-tr'),
+            'BOTTOM LEFT': document.getElementById('btn-bl'),
+            'BOTTOM RIGHT': document.getElementById('btn-br')
+        };
 
         ws.onmessage = (event) => {
             const data = JSON.parse(event.data);
             // numeric delta may be missing for non-rotary events
             const delta = data.delta !== undefined ? parseInt(data.delta) : null;
+            
+            // Handle button events
+            if (data.type === 'button') {
+                const btn = buttons[data.button];
+                if (btn) {
+                    if (data.pressed) {
+                        btn.classList.add('pressed');
+                    } else {
+                        btn.classList.remove('pressed');
+                    }
+                }
+                return;
+            }
+            
+            const delta = parseInt(data.delta);
 
             if (data.ctrl === "BIG") {
                 dialRotation += delta * 4; // Multiplier for visual feel
@@ -278,6 +409,26 @@ async def bridge_handler(request):
         async for msg in ws:
             if msg.type == web.WSMsgType.TEXT:
                 payload = msg.data
+                # Update global state and write to files
+                try:
+                    data = json.loads(payload)
+                    
+                    # Handle button events
+                    if data.get('type') == 'button':
+                        button_name = data.get('button', '')
+                        pressed = data.get('pressed', False)
+                        if button_name in button_states:
+                            button_states[button_name] = pressed
+                            print(f"[*] Button: {button_name} {'PRESSED' if pressed else 'RELEASED'}")
+                    # Handle dial/scroller events
+                    elif 'delta' in data:
+                        last_slider_state.update(data)
+                        ctrl = data.get('ctrl', 'BIG')
+                        delta = data.get('delta', 0)
+                        write_command_file(delta, ctrl)
+                        write_position_file(delta, ctrl)
+                except:
+                    pass
                 # Relay to any connected browser clients
                 await broadcast_to_browsers(payload)
             elif msg.type == web.WSMsgType.ERROR:
@@ -285,6 +436,19 @@ async def bridge_handler(request):
     finally:
         print(f"[*] Bridge disconnected from {peer}")
     return ws
+
+
+async def status_handler(request):
+    """HTTP endpoint for scripts to poll current slider state"""
+    return web.json_response(last_slider_state)
+
+
+async def reset_position_handler(request):
+    """Reset accumulated position to zero"""
+    global accumulated_position
+    accumulated_position = {"x": 0, "y": 0}
+    write_position_file(0, "RESET")
+    return web.json_response({"status": "ok", "position": accumulated_position})
 
 
 async def index_handler(request):
@@ -297,6 +461,8 @@ def start_app():
         web.get('/', index_handler),
         web.get('/ws', websocket_handler),
         web.get('/bridge', bridge_handler),
+        web.get('/status', status_handler),
+        web.get('/reset', reset_position_handler),
     ])
     return app
 
