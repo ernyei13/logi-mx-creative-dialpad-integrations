@@ -1,8 +1,59 @@
 import asyncio
 import json
+import time
+import os
 from aiohttp import web
 
 WEB_PORT = 8080
+COMMAND_FILE = "C:/temp/logi_command.json"
+POSITION_FILE = "C:/temp/logi_position.json"
+
+# Ensure temp directory exists
+os.makedirs(os.path.dirname(COMMAND_FILE), exist_ok=True)
+
+# Global state for tracking slider and accumulated position
+last_slider_state = {
+    "delta": 0,
+    "ctrl": "unknown"
+}
+
+# Accumulated position offsets
+accumulated_position = {
+    "x": 0,
+    "y": 0
+}
+
+
+def write_command_file(delta, ctrl="BIG"):
+    """Write command to file for ExtendScript to read"""
+    try:
+        cmd = {
+            "delta": delta,
+            "ctrl": ctrl,
+            "timestamp": time.time()
+        }
+        with open(COMMAND_FILE, 'w') as f:
+            json.dump(cmd, f)
+        print(f"[*] Wrote command: delta={delta}")
+    except Exception as e:
+        print(f"[!] Error writing command file: {e}")
+
+
+def write_position_file(delta, ctrl="BIG"):
+    """Write accumulated position to file for AE expression to read"""
+    global accumulated_position
+    try:
+        # Accumulate based on control type
+        if ctrl == "BIG":
+            accumulated_position["x"] += delta
+        else:
+            accumulated_position["y"] += delta
+        
+        with open(POSITION_FILE, 'w') as f:
+            json.dump(accumulated_position, f)
+        print(f"[*] Position: x={accumulated_position['x']}, y={accumulated_position['y']}")
+    except Exception as e:
+        print(f"[!] Error writing position file: {e}")
 
 # Keep small and self-contained: copy of the HTML UI used previously
 HTML_CONTENT = """
@@ -261,6 +312,18 @@ async def bridge_handler(request):
         async for msg in ws:
             if msg.type == web.WSMsgType.TEXT:
                 payload = msg.data
+                # Update global state and write to files
+                try:
+                    data = json.loads(payload)
+                    last_slider_state.update(data)
+                    # Write to command file and position file for ExtendScript
+                    if 'delta' in data:
+                        ctrl = data.get('ctrl', 'BIG')
+                        delta = data.get('delta', 0)
+                        write_command_file(delta, ctrl)
+                        write_position_file(delta, ctrl)
+                except:
+                    pass
                 # Relay to any connected browser clients
                 await broadcast_to_browsers(payload)
             elif msg.type == web.WSMsgType.ERROR:
@@ -268,6 +331,19 @@ async def bridge_handler(request):
     finally:
         print(f"[*] Bridge disconnected from {peer}")
     return ws
+
+
+async def status_handler(request):
+    """HTTP endpoint for scripts to poll current slider state"""
+    return web.json_response(last_slider_state)
+
+
+async def reset_position_handler(request):
+    """Reset accumulated position to zero"""
+    global accumulated_position
+    accumulated_position = {"x": 0, "y": 0}
+    write_position_file(0, "RESET")
+    return web.json_response({"status": "ok", "position": accumulated_position})
 
 
 async def index_handler(request):
@@ -280,6 +356,8 @@ def start_app():
         web.get('/', index_handler),
         web.get('/ws', websocket_handler),
         web.get('/bridge', bridge_handler),
+        web.get('/status', status_handler),
+        web.get('/reset', reset_position_handler),
     ])
     return app
 
