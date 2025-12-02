@@ -313,14 +313,12 @@ HTML_CONTENT = """
 
         ws.onmessage = (event) => {
             const data = JSON.parse(event.data);
-            // numeric delta may be missing for non-rotary events
-            const delta = data.delta !== undefined ? parseInt(data.delta) : null;
             
-            // Handle button events
-            if (data.type === 'button') {
-                const btn = buttons[data.button];
+            // Handle button events (ctrl: "BTN", name: "...", state: "PRESSED"/"RELEASED")
+            if (data.ctrl === 'BTN') {
+                const btn = buttons[data.name];
                 if (btn) {
-                    if (data.pressed) {
+                    if (data.state === 'PRESSED') {
                         btn.classList.add('pressed');
                     } else {
                         btn.classList.remove('pressed');
@@ -413,10 +411,10 @@ async def bridge_handler(request):
                 try:
                     data = json.loads(payload)
                     
-                    # Handle button events
-                    if data.get('type') == 'button':
-                        button_name = data.get('button', '')
-                        pressed = data.get('pressed', False)
+                    # Handle button events (ctrl: "BTN", name: "...", state: "PRESSED"/"RELEASED")
+                    if data.get('ctrl') == 'BTN':
+                        button_name = data.get('name', '')
+                        pressed = data.get('state') == 'PRESSED'
                         if button_name in button_states:
                             button_states[button_name] = pressed
                             print(f"[*] Button: {button_name} {'PRESSED' if pressed else 'RELEASED'}")
