@@ -278,6 +278,23 @@ def broadcast_to_web(ctrl_type, delta):
         asyncio.run_coroutine_threadsafe(SEND_QUEUE.put(payload), LOOP)
 
 
+def broadcast_button_to_web(button_name, pressed):
+    """Send button state to the web interface.
+    button_name: 'TOP LEFT', 'TOP RIGHT', 'BOTTOM LEFT', 'BOTTOM RIGHT'
+    pressed: True if pressed, False if released
+    """
+    if LOOP and SEND_QUEUE:
+        payload = json.dumps({
+            "type": "button",
+            "button": button_name,
+            "pressed": pressed
+        })
+        print(f"[*] Sending button to web: {payload}")
+        asyncio.run_coroutine_threadsafe(SEND_QUEUE.put(payload), LOOP)
+    else:
+        print(f"[!] Cannot send button - LOOP={LOOP is not None}, QUEUE={SEND_QUEUE is not None}")
+
+
 async def _send_loop_over_ws(ws):
     """Continuously read from SEND_QUEUE and send over the open websocket."""
     while True:
@@ -349,6 +366,8 @@ def process_data(data):
                     state = bool(btn_byte & bit)
                     action = 'PRESSED' if state else 'RELEASED'
                     print(f"[{timestamp}] BUTTON        | {name:<12} | {action}")
+                    # Send to web interface
+                    broadcast_button_to_web(name, state)
         LAST_BTN_BYTE1 = btn_byte
 
         # Log any other non-zero bytes (raw) so we can see button presses

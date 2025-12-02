@@ -23,6 +23,14 @@ accumulated_position = {
     "y": 0
 }
 
+# Button states
+button_states = {
+    "TOP LEFT": False,
+    "TOP RIGHT": False,
+    "BOTTOM LEFT": False,
+    "BOTTOM RIGHT": False
+}
+
 
 def write_command_file(delta, ctrl="BIG"):
     """Write command to file for ExtendScript to read"""
@@ -194,6 +202,43 @@ HTML_CONTENT = """
         }
         .active .value { color: var(--accent); text-shadow: 0 0 15px rgba(59, 130, 246, 0.5); }
 
+        /* --- BUTTON GRID --- */
+        .button-grid {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 10px;
+            width: 140px;
+        }
+        
+        .hw-button {
+            width: 60px;
+            height: 60px;
+            background: linear-gradient(145deg, #1a1a1a, #0f0f0f);
+            border: 2px solid #333;
+            border-radius: 8px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 0.6rem;
+            color: var(--text-dim);
+            text-transform: uppercase;
+            letter-spacing: 1px;
+            transition: all 0.1s ease;
+            box-shadow: 
+                0 4px 6px rgba(0,0,0,0.4),
+                inset 0 1px 0 rgba(255,255,255,0.05);
+        }
+        
+        .hw-button.pressed {
+            background: linear-gradient(145deg, #0a0a0a, #151515);
+            border-color: var(--accent);
+            color: var(--accent);
+            box-shadow: 
+                0 0 20px rgba(59, 130, 246, 0.3),
+                inset 0 2px 4px rgba(0,0,0,0.5);
+            transform: translateY(2px);
+        }
+
     </style>
 </head>
 <body>
@@ -201,6 +246,18 @@ HTML_CONTENT = """
     <div class="header">MX Creative Interface</div>
 
     <div class="stage">
+        <div id="group-buttons">
+            <div class="button-grid">
+                <div class="hw-button" id="btn-tl">Top<br>Left</div>
+                <div class="hw-button" id="btn-tr">Top<br>Right</div>
+                <div class="hw-button" id="btn-bl">Bot<br>Left</div>
+                <div class="hw-button" id="btn-br">Bot<br>Right</div>
+            </div>
+            <div class="meta">
+                <div class="label">Buttons</div>
+            </div>
+        </div>
+
         <div id="group-big">
             <div class="dial-container">
                 <div class="dial-ring" id="dial-visual">
@@ -239,9 +296,31 @@ HTML_CONTENT = """
         const valSmall = document.getElementById('val-small');
         const groupBig = document.getElementById('group-big');
         const groupSmall = document.getElementById('group-small');
+        
+        // Button elements
+        const buttons = {
+            'TOP LEFT': document.getElementById('btn-tl'),
+            'TOP RIGHT': document.getElementById('btn-tr'),
+            'BOTTOM LEFT': document.getElementById('btn-bl'),
+            'BOTTOM RIGHT': document.getElementById('btn-br')
+        };
 
         ws.onmessage = (event) => {
             const data = JSON.parse(event.data);
+            
+            // Handle button events
+            if (data.type === 'button') {
+                const btn = buttons[data.button];
+                if (btn) {
+                    if (data.pressed) {
+                        btn.classList.add('pressed');
+                    } else {
+                        btn.classList.remove('pressed');
+                    }
+                }
+                return;
+            }
+            
             const delta = parseInt(data.delta);
             
             if (data.ctrl === "BIG") {
@@ -315,9 +394,17 @@ async def bridge_handler(request):
                 # Update global state and write to files
                 try:
                     data = json.loads(payload)
-                    last_slider_state.update(data)
-                    # Write to command file and position file for ExtendScript
-                    if 'delta' in data:
+                    
+                    # Handle button events
+                    if data.get('type') == 'button':
+                        button_name = data.get('button', '')
+                        pressed = data.get('pressed', False)
+                        if button_name in button_states:
+                            button_states[button_name] = pressed
+                            print(f"[*] Button: {button_name} {'PRESSED' if pressed else 'RELEASED'}")
+                    # Handle dial/scroller events
+                    elif 'delta' in data:
+                        last_slider_state.update(data)
                         ctrl = data.get('ctrl', 'BIG')
                         delta = data.get('delta', 0)
                         write_command_file(delta, ctrl)
