@@ -274,7 +274,14 @@ def broadcast_to_web(ctrl_type, delta):
     This is safe to call from the HID thread.
     """
     if LOOP and SEND_QUEUE:
-        payload = json.dumps({"ctrl": ctrl_type, "delta": delta})
+        # Accept either a numeric `delta` or a richer dict payload
+        if isinstance(delta, dict):
+            payload_obj = {"ctrl": ctrl_type}
+            payload_obj.update(delta)
+        else:
+            payload_obj = {"ctrl": ctrl_type, "delta": delta}
+
+        payload = json.dumps(payload_obj)
         asyncio.run_coroutine_threadsafe(SEND_QUEUE.put(payload), LOOP)
 
 
@@ -349,6 +356,8 @@ def process_data(data):
                     state = bool(btn_byte & bit)
                     action = 'PRESSED' if state else 'RELEASED'
                     print(f"[{timestamp}] BUTTON        | {name:<12} | {action}")
+                    # Send button event to remote receiver so browsers see it
+                    broadcast_to_web("BTN", {"name": name, "state": action})
         LAST_BTN_BYTE1 = btn_byte
 
         # Log any other non-zero bytes (raw) so we can see button presses

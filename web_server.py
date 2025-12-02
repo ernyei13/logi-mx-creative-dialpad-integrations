@@ -173,6 +173,12 @@ HTML_CONTENT = """
                 <div class="value" id="val-small">0</div>
             </div>
         </div>
+        <div id="group-buttons" style="margin-left:20px;">
+            <div class="meta">
+                <div class="label">Buttons</div>
+                <div class="value" id="btn-log">—</div>
+            </div>
+        </div>
     </div>
 
     <script>
@@ -191,8 +197,9 @@ HTML_CONTENT = """
 
         ws.onmessage = (event) => {
             const data = JSON.parse(event.data);
-            const delta = parseInt(data.delta);
-            
+            // numeric delta may be missing for non-rotary events
+            const delta = data.delta !== undefined ? parseInt(data.delta) : null;
+
             if (data.ctrl === "BIG") {
                 dialRotation += delta * 4; // Multiplier for visual feel
                 elDial.style.transform = `rotate(${dialRotation}deg)`;
@@ -202,7 +209,7 @@ HTML_CONTENT = """
                 groupBig.classList.add('active');
                 clearTimeout(tBig);
                 tBig = setTimeout(() => groupBig.classList.remove('active'), 300);
-            } 
+            }
             else if (data.ctrl === "SMALL") {
                 scrollPosition -= delta * 15; // Move background pixels
                 elScroll.style.backgroundPositionY = `${scrollPosition}px`;
@@ -212,6 +219,16 @@ HTML_CONTENT = """
                 groupSmall.classList.add('active');
                 clearTimeout(tSmall);
                 tSmall = setTimeout(() => groupSmall.classList.remove('active'), 300);
+            }
+            else if (data.ctrl === "BTN") {
+                // Display latest button event
+                const name = data.name || 'BTN';
+                const state = data.state || '';
+                const el = document.getElementById('btn-log');
+                el.innerText = `${name} ${state}`;
+                // briefly highlight
+                el.style.color = '#3b82f6';
+                setTimeout(() => el.style.color = '', 500);
             }
         };
 
