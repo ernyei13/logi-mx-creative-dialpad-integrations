@@ -7,6 +7,7 @@ from aiohttp import web
 WEB_PORT = 8080
 COMMAND_FILE = "C:/temp/logi_command.json"
 POSITION_FILE = "C:/temp/logi_position.json"
+BUTTON_FILE = "C:/temp/logi_button.json"
 
 # Ensure temp directory exists
 os.makedirs(os.path.dirname(COMMAND_FILE), exist_ok=True)
@@ -62,6 +63,21 @@ def write_position_file(delta, ctrl="BIG"):
         print(f"[*] Position: x={accumulated_position['x']}, y={accumulated_position['y']}")
     except Exception as e:
         print(f"[!] Error writing position file: {e}")
+
+
+def write_button_file(button_name, pressed):
+    """Write button state to file for ExtendScript to read"""
+    try:
+        btn_data = {
+            "button": button_name,
+            "pressed": pressed,
+            "timestamp": time.time()
+        }
+        with open(BUTTON_FILE, 'w') as f:
+            json.dump(btn_data, f)
+    except Exception as e:
+        print(f"[!] Error writing button file: {e}")
+
 
 # Keep small and self-contained: copy of the HTML UI used previously
 HTML_CONTENT = """
@@ -418,6 +434,8 @@ async def bridge_handler(request):
                         if button_name in button_states:
                             button_states[button_name] = pressed
                             print(f"[*] Button: {button_name} {'PRESSED' if pressed else 'RELEASED'}")
+                            # Write to file for ExtendScript
+                            write_button_file(button_name, pressed)
                     # Handle dial/scroller events
                     elif 'delta' in data:
                         last_slider_state.update(data)

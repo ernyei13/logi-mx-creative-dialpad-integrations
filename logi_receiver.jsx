@@ -35,6 +35,7 @@ if (typeof JSON === 'undefined') {
 
 (function() {
     var POSITION_FILE = "C:/temp/logi_position.json";
+    var BUTTON_FILE = "C:/temp/logi_button.json";
     
     // State
     var isActive = false;
@@ -43,6 +44,7 @@ if (typeof JSON === 'undefined') {
     var lastLayerName = "";
     var currentEffects = [];
     var currentProperties = [];
+    var lastButtonTimestamp = 0;  // Track button events to avoid duplicates
     
     // Create UI
     var win = new Window("palette", "Logi Dial - Effect Control", undefined, {resizeable: false});
@@ -158,6 +160,29 @@ if (typeof JSON === 'undefined') {
             // Parse error - return cached value
         }
         return lastValidPosition;
+    }
+    
+    /**
+     * Read button state from file
+     * Returns {button: "TOP LEFT", pressed: true, timestamp: 123456} or null
+     */
+    function readButtonFile() {
+        try {
+            var file = new File(BUTTON_FILE);
+            if (file.exists) {
+                file.open("r");
+                var content = file.read();
+                file.close();
+                
+                if (content && content.length > 0) {
+                    content = content.replace(/^\s+|\s+$/g, ''); // trim
+                    if (content.charAt(0) === '{' && content.charAt(content.length - 1) === '}') {
+                        return JSON.parse(content);
+                    }
+                }
+            }
+        } catch (e) {}
+        return null;
     }
     
     /**
@@ -336,14 +361,8 @@ if (typeof JSON === 'undefined') {
         
         for (var i = 0; i < currentProperties.length; i++) {
             var p = currentProperties[i];
-            var label = p.name;
-            // Show current value in dropdown for easier identification
-            if (typeof p.currentValue === "number") {
-                label += " (" + p.currentValue.toFixed(2) + ")";
-            } else if (p.currentValue instanceof Array) {
-                label += " [arr]";
-            }
-            propDropdown.add("item", label);
+            // Just use the property name without values
+            propDropdown.add("item", p.name);
         }
         propDropdown.selection = 0;
     }
@@ -358,6 +377,45 @@ if (typeof JSON === 'undefined') {
     propDropdown.onChange = function() {
         lastDialValue = null;
     };
+    
+    /**
+     * Check for button presses and navigate properties
+     */
+    function checkButtons() {
+        var btnData = readButtonFile();
+        if (!btnData || !btnData.button) return;
+        
+        // Check if this is a new button event (by timestamp)
+        var ts = btnData.timestamp || 0;
+        if (ts <= lastButtonTimestamp) return;
+        lastButtonTimestamp = ts;
+        
+        // Only handle press events, not releases
+        if (!btnData.pressed) return;
+        
+        var currentIdx = propDropdown.selection ? propDropdown.selection.index : 0;
+        var newIdx = currentIdx;
+        
+        if (btnData.button === "TOP RIGHT") {
+            // Next property
+            newIdx = currentIdx + 1;
+            if (newIdx >= currentProperties.length) {
+                newIdx = 0; // Wrap around
+            }
+        } else if (btnData.button === "TOP LEFT") {
+            // Previous property
+            newIdx = currentIdx - 1;
+            if (newIdx < 0) {
+                newIdx = currentProperties.length - 1; // Wrap around
+            }
+        }
+        
+        if (newIdx !== currentIdx && currentProperties.length > 0) {
+            propDropdown.selection = newIdx;
+            lastDialValue = null; // Reset dial tracking for new property
+            statusText.text = "Property: " + currentProperties[newIdx].name;
+        }
+    }
     
     /**
      * Update the selected property based on dial position
@@ -517,6 +575,7 @@ if (typeof JSON === 'undefined') {
     // Make update function globally accessible
     $.global.logiEffectUpdate = function() {
         if (isActive) {
+            checkButtons();  // Check for button navigation
             updateProperty();
         }
     };
