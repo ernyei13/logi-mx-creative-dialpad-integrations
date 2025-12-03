@@ -33,19 +33,27 @@ if (typeof JSON === 'undefined') {
     };
 }
 
-(function() {
+(function(thisObj) {
     var POSITION_FILE = "C:/temp/logi_position.json";
+    var BUTTON_FILE = "C:/temp/logi_button.json";
     
     // State
     var isActive = false;
     var autoUpdateInterval = null;
     var lastDialValue = null;
+    var lastSmallDialValue = null;  // Track small dial separately
     var lastLayerName = "";
     var currentEffects = [];
     var currentProperties = [];
+    var lastButtonTimestamp = 0;  // Track button events to avoid duplicates
     
-    // Create UI
-    var win = new Window("palette", "Logi Dial - Effect Control", undefined, {resizeable: false});
+    // Build UI - support both dockable panel and floating window
+    function buildUI(thisObj) {
+        var win = (thisObj instanceof Panel) ? thisObj : new Window("palette", "Logi Dial - Effect Control", undefined, {resizeable: true});
+        return win;
+    }
+    
+    var win = buildUI(thisObj);
     win.orientation = "column";
     win.alignChildren = ["fill", "top"];
     
@@ -91,11 +99,18 @@ if (typeof JSON === 'undefined') {
     // Sensitivity
     var sensPanel = win.add("panel", undefined, "Settings");
     sensPanel.alignChildren = ["fill", "top"];
+    
     var sensGroup = sensPanel.add("group");
-    sensGroup.add("statictext", undefined, "Sensitivity:");
+    sensGroup.add("statictext", undefined, "Big Dial:");
     var sensInput = sensGroup.add("edittext", undefined, "0.1");
     sensInput.characters = 8;
-    sensGroup.add("statictext", undefined, "(per dial tick)");
+    sensGroup.add("statictext", undefined, "(coarse)");
+    
+    var sensGroup2 = sensPanel.add("group");
+    sensGroup2.add("statictext", undefined, "Small Dial:");
+    var sensInputSmall = sensGroup2.add("edittext", undefined, "0.01");
+    sensInputSmall.characters = 8;
+    sensGroup2.add("statictext", undefined, "(fine)");
     
     // Buttons
     var buttonPanel = win.add("panel", undefined, "Controls");
@@ -108,18 +123,6 @@ if (typeof JSON === 'undefined') {
     
     var btnGroup2 = buttonPanel.add("group");
     var resetBtn = btnGroup2.add("button", undefined, "Reset Dial");
-    
-    // Info
-    var infoPanel = win.add("panel", undefined, "How It Works");
-    infoPanel.alignChildren = ["fill", "top"];
-    var infoText = infoPanel.add("statictext", undefined, 
-        "1. Select a layer with effects\n" +
-        "2. Choose Effect and Property from dropdowns\n" +
-        "3. Click 'Start' and rotate dial!\n" +
-        "4. Switch layers/effects anytime",
-        {multiline: true}
-    );
-    infoText.preferredSize = [420, 70];
     
     // Cache for last valid position (prevents glitches from corrupted reads)
     var lastValidPosition = {x: 0, y: 0};
@@ -158,6 +161,29 @@ if (typeof JSON === 'undefined') {
             // Parse error - return cached value
         }
         return lastValidPosition;
+    }
+    
+    /**
+     * Read button state from file
+     * Returns {button: "TOP LEFT", pressed: true, timestamp: 123456} or null
+     */
+    function readButtonFile() {
+        try {
+            var file = new File(BUTTON_FILE);
+            if (file.exists) {
+                file.open("r");
+                var content = file.read();
+                file.close();
+                
+                if (content && content.length > 0) {
+                    content = content.replace(/^\s+|\s+$/g, ''); // trim
+                    if (content.charAt(0) === '{' && content.charAt(content.length - 1) === '}') {
+                        return JSON.parse(content);
+                    }
+                }
+            }
+        } catch (e) {}
+        return null;
     }
     
     /**
@@ -336,14 +362,8 @@ if (typeof JSON === 'undefined') {
         
         for (var i = 0; i < currentProperties.length; i++) {
             var p = currentProperties[i];
-            var label = p.name;
-            // Show current value in dropdown for easier identification
-            if (typeof p.currentValue === "number") {
-                label += " (" + p.currentValue.toFixed(2) + ")";
-            } else if (p.currentValue instanceof Array) {
-                label += " [arr]";
-            }
-            propDropdown.add("item", label);
+            // Just use the property name without values
+            propDropdown.add("item", p.name);
         }
         propDropdown.selection = 0;
     }
@@ -358,6 +378,122 @@ if (typeof JSON === 'undefined') {
     propDropdown.onChange = function() {
         lastDialValue = null;
     };
+    
+    /**
+     * Select a layer by index in the current comp
+     */
+    function selectLayerByIndex(layerIndex) {
+        try {
+            var comp = app.project.activeItem;
+            if (!comp || !(comp instanceof CompItem)) return;
+            
+            if (layerIndex >= 1 && layerIndex <= comp.numLayers) {
+                // Deselect all layers first
+                for (var i = 1; i <= comp.numLayers; i++) {
+                    comp.layer(i).selected = false;
+                }
+                // Select the target layer
+                comp.layer(layerIndex).selected = true;
+                lastLayerName = ""; // Force refresh
+                populateEffects();
+                statusText.text = "Layer: " + comp.layer(layerIndex).name;
+            }
+        } catch (e) {
+            statusText.text = "Layer select error: " + e.message;
+        }
+    }
+    
+    /**
+     * Get current layer index in comp
+     */
+    function getCurrentLayerIndex() {
+        try {
+            var comp = app.project.activeItem;
+            if (!comp || !(comp instanceof CompItem)) return -1;
+            
+            var layer = comp.selectedLayers[0];
+            if (!layer) return -1;
+            
+            return layer.index;
+        } catch (e) {
+            return -1;
+        }
+    }
+    
+    /**
+     * Check for button presses and navigate properties/layers
+     */
+    function checkButtons() {
+        var btnData = readButtonFile();
+        if (!btnData || !btnData.button) return;
+        
+        // Check if this is a new button event (by timestamp)
+        var ts = btnData.timestamp || 0;
+        if (ts <= lastButtonTimestamp) return;
+        lastButtonTimestamp = ts;
+        
+        // Only handle press events, not releases
+        if (!btnData.pressed) return;
+        
+        // TOP buttons: navigate properties
+        if (btnData.button === "TOP RIGHT" || btnData.button === "TOP LEFT") {
+            var currentIdx = propDropdown.selection ? propDropdown.selection.index : 0;
+            var newIdx = currentIdx;
+            
+            if (btnData.button === "TOP RIGHT") {
+                // Next property
+                newIdx = currentIdx + 1;
+                if (newIdx >= currentProperties.length) {
+                    newIdx = 0; // Wrap around
+                }
+            } else if (btnData.button === "TOP LEFT") {
+                // Previous property
+                newIdx = currentIdx - 1;
+                if (newIdx < 0) {
+                    newIdx = currentProperties.length - 1; // Wrap around
+                }
+            }
+            
+            if (newIdx !== currentIdx && currentProperties.length > 0) {
+                propDropdown.selection = newIdx;
+                lastDialValue = null; // Reset dial tracking for new property
+                statusText.text = "Property: " + currentProperties[newIdx].name;
+            }
+        }
+        
+        // BOTTOM buttons: navigate layers
+        if (btnData.button === "BOTTOM RIGHT" || btnData.button === "BOTTOM LEFT") {
+            try {
+                var comp = app.project.activeItem;
+                if (!comp || !(comp instanceof CompItem)) return;
+                
+                var currentLayerIdx = getCurrentLayerIndex();
+                if (currentLayerIdx < 0) currentLayerIdx = 1;
+                
+                var newLayerIdx = currentLayerIdx;
+                
+                if (btnData.button === "BOTTOM RIGHT") {
+                    // Next layer (down in layer stack)
+                    newLayerIdx = currentLayerIdx + 1;
+                    if (newLayerIdx > comp.numLayers) {
+                        newLayerIdx = 1; // Wrap around
+                    }
+                } else if (btnData.button === "BOTTOM LEFT") {
+                    // Previous layer (up in layer stack)
+                    newLayerIdx = currentLayerIdx - 1;
+                    if (newLayerIdx < 1) {
+                        newLayerIdx = comp.numLayers; // Wrap around
+                    }
+                }
+                
+                if (newLayerIdx !== currentLayerIdx) {
+                    selectLayerByIndex(newLayerIdx);
+                }
+            } catch (e) {
+                statusText.text = "Layer switch error: " + e.message;
+            }
+        }
+    }
     
     /**
      * Update the selected property based on dial position
@@ -409,28 +545,40 @@ if (typeof JSON === 'undefined') {
             // Read dial position
             var pos = readPositionFile();
             var dialValue = pos.x;
+            var smallDialValue = pos.y;
             
-            // Validate dial value
+            // Validate dial values
             if (typeof dialValue !== 'number' || !isFinite(dialValue)) {
                 return; // Skip invalid reads
             }
+            if (typeof smallDialValue !== 'number' || !isFinite(smallDialValue)) {
+                smallDialValue = lastSmallDialValue || 0;
+            }
             
-            // Only update if dial value changed
-            if (dialValue === lastDialValue) {
+            // Check if either dial changed
+            var bigDialChanged = (dialValue !== lastDialValue);
+            var smallDialChanged = (smallDialValue !== lastSmallDialValue);
+            
+            if (!bigDialChanged && !smallDialChanged) {
                 return;
             }
             
             var dialDelta = (lastDialValue !== null) ? (dialValue - lastDialValue) : 0;
+            var smallDialDelta = (lastSmallDialValue !== null) ? (smallDialValue - lastSmallDialValue) : 0;
             
-            // Limit maximum delta to prevent glitches (max 50 ticks per update)
-            var maxDelta = 50;
+            // Limit maximum delta to prevent glitches from corrupted reads
+            // Use 200 to allow fast spinning while still catching file corruption
+            var maxDelta = 200;
             if (Math.abs(dialDelta) > maxDelta) {
                 // Likely a glitch or file corruption - ignore this update
-                lastDialValue = dialValue;
-                return;
+                dialDelta = 0;
+            }
+            if (Math.abs(smallDialDelta) > maxDelta) {
+                smallDialDelta = 0;
             }
             
             lastDialValue = dialValue;
+            lastSmallDialValue = smallDialValue;
             
             // Get current value
             var currentValue;
@@ -442,7 +590,7 @@ if (typeof JSON === 'undefined') {
             }
             
             // Skip first read (just sync and display)
-            if (dialDelta === 0) {
+            if (dialDelta === 0 && smallDialDelta === 0) {
                 if (typeof currentValue === "number") {
                     valDisplay.text = currentValue.toFixed(2);
                 } else if (currentValue instanceof Array) {
@@ -454,8 +602,10 @@ if (typeof JSON === 'undefined') {
                 return;
             }
             
-            var sensitivity = parseFloat(sensInput.text) || 0.1;
-            var delta = dialDelta * sensitivity;
+            // Calculate combined delta from both dials
+            var bigSensitivity = parseFloat(sensInput.text) || 0.1;
+            var smallSensitivity = parseFloat(sensInputSmall.text) || 0.01;
+            var delta = (dialDelta * bigSensitivity) + (smallDialDelta * smallSensitivity);
             
             try {
                 // Try to handle ANY property type
@@ -517,6 +667,7 @@ if (typeof JSON === 'undefined') {
     // Make update function globally accessible
     $.global.logiEffectUpdate = function() {
         if (isActive) {
+            checkButtons();  // Check for button navigation
             updateProperty();
         }
     };
@@ -547,6 +698,7 @@ if (typeof JSON === 'undefined') {
             file.write('{"x": 0, "y": 0}');
             file.close();
             lastDialValue = null;
+            lastSmallDialValue = null;
             statusText.text = "Dial reset to zero.";
         } catch (e) {
             statusText.text = "Error resetting: " + e.message;
@@ -649,6 +801,10 @@ if (typeof JSON === 'undefined') {
     // Initial population
     populateEffects();
     
-    // Show window
-    win.show();
-})();
+    // Show window (only for non-dockable panels)
+    if (win instanceof Window) {
+        win.show();
+    } else {
+        win.layout.layout(true);
+    }
+})(this);
