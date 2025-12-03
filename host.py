@@ -566,7 +566,7 @@ def main():
         return
 
     # Ask for the receiver host (machine running `web_server.py`)
-    receiver = input(f"\nReceiver host/IP (machine running the web server) [10.10.101.133]: ") or "10.10.101.133"
+    receiver = input(f"\nReceiver host/IP (machine running the web server) [10.10.101.133]: ") or "127.0.0.1"
 
     print("-" * 60)
     print(f"Target: {target.get('product_string','Unknown')}")

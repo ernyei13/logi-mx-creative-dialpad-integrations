@@ -218,12 +218,20 @@ HTML_CONTENT = """
         }
         .active .value { color: var(--accent); text-shadow: 0 0 15px rgba(59, 130, 246, 0.5); }
 
-        /* --- BUTTON GRID --- */
+        /* --- BUTTON GRID (Keypad 3x3) --- */
         .button-grid {
             display: grid;
-            grid-template-columns: 1fr 1fr;
-            gap: 10px;
-            width: 140px;
+            grid-template-columns: repeat(3, 1fr);
+            gap: 8px;
+            width: 200px;
+        }
+
+        /* --- BUTTON GRID (Dialpad 2x2) --- */
+        .button-grid-2x2 {
+            display: grid;
+            grid-template-columns: repeat(2, 1fr);
+            gap: 8px;
+            width: 130px;
         }
         
         .hw-button {
@@ -235,10 +243,9 @@ HTML_CONTENT = """
             display: flex;
             align-items: center;
             justify-content: center;
-            font-size: 0.6rem;
+            font-size: 0.7rem;
+            font-weight: bold;
             color: var(--text-dim);
-            text-transform: uppercase;
-            letter-spacing: 1px;
             transition: all 0.1s ease;
             box-shadow: 
                 0 4px 6px rgba(0,0,0,0.4),
@@ -262,15 +269,32 @@ HTML_CONTENT = """
     <div class="header">MX Creative Interface</div>
 
     <div class="stage">
-        <div id="group-buttons">
+        <div id="group-keypad">
             <div class="button-grid">
-                <div class="hw-button" id="btn-tl">Top<br>Left</div>
-                <div class="hw-button" id="btn-tr">Top<br>Right</div>
-                <div class="hw-button" id="btn-bl">Bot<br>Left</div>
-                <div class="hw-button" id="btn-br">Bot<br>Right</div>
+                <div class="hw-button" id="btn-1">1</div>
+                <div class="hw-button" id="btn-2">2</div>
+                <div class="hw-button" id="btn-3">3</div>
+                <div class="hw-button" id="btn-4">4</div>
+                <div class="hw-button" id="btn-5">5</div>
+                <div class="hw-button" id="btn-6">6</div>
+                <div class="hw-button" id="btn-7">7</div>
+                <div class="hw-button" id="btn-8">8</div>
+                <div class="hw-button" id="btn-9">9</div>
             </div>
             <div class="meta">
-                <div class="label">Buttons</div>
+                <div class="label">Keypad</div>
+            </div>
+        </div>
+
+        <div id="group-dialpad-btns">
+            <div class="button-grid-2x2">
+                <div class="hw-button" id="btn-tl">TL</div>
+                <div class="hw-button" id="btn-tr">TR</div>
+                <div class="hw-button" id="btn-bl">BL</div>
+                <div class="hw-button" id="btn-br">BR</div>
+            </div>
+            <div class="meta">
+                <div class="label">Dialpad</div>
             </div>
         </div>
 
@@ -297,12 +321,6 @@ HTML_CONTENT = """
                 <div class="value" id="val-small">0</div>
             </div>
         </div>
-        <div id="group-buttons" style="margin-left:20px;">
-            <div class="meta">
-                <div class="label">Buttons</div>
-                <div class="value" id="btn-log">—</div>
-            </div>
-        </div>
     </div>
 
     <script>
@@ -319,22 +337,30 @@ HTML_CONTENT = """
         const groupBig = document.getElementById('group-big');
         const groupSmall = document.getElementById('group-small');
         
-        // Button elements
-        const buttons = {
-            'TOP LEFT': document.getElementById('btn-tl'),
-            'TOP RIGHT': document.getElementById('btn-tr'),
-            'BOTTOM LEFT': document.getElementById('btn-bl'),
-            'BOTTOM RIGHT': document.getElementById('btn-br')
+        // Keypad button elements (1-9)
+        const keypadButtons = {};
+        for (let i = 1; i <= 9; i++) {
+            keypadButtons[i] = document.getElementById('btn-' + i);
+        }
+
+        // Dialpad button elements (4 corner buttons)
+        const dialpadButtons = {
+            "TOP LEFT": document.getElementById('btn-tl'),
+            "TOP RIGHT": document.getElementById('btn-tr'),
+            "BOTTOM LEFT": document.getElementById('btn-bl'),
+            "BOTTOM RIGHT": document.getElementById('btn-br')
         };
 
         ws.onmessage = (event) => {
             const data = JSON.parse(event.data);
             
-            // Handle button events (ctrl: "BTN", name: "...", state: "PRESSED"/"RELEASED")
-            if (data.ctrl === 'BTN') {
-                const btn = buttons[data.name];
+            // Handle keypad button events (BTN ctrl with numeric name like "1", "2", etc.)
+            if (data.ctrl === "KEYPAD") {
+                const btnNum = parseInt(data.button);
+                const btn = keypadButtons[btnNum];
                 if (btn) {
-                    if (data.state === 'PRESSED') {
+                    if (data.state === "PRESSED") {
+
                         btn.classList.add('pressed');
                     } else {
                         btn.classList.remove('pressed');
@@ -342,8 +368,6 @@ HTML_CONTENT = """
                 }
                 return;
             }
-            
-            const delta = parseInt(data.delta);
 
             if (data.ctrl === "BIG") {
                 dialRotation += delta * 4; // Multiplier for visual feel
@@ -366,14 +390,15 @@ HTML_CONTENT = """
                 tSmall = setTimeout(() => groupSmall.classList.remove('active'), 300);
             }
             else if (data.ctrl === "BTN") {
-                // Display latest button event
-                const name = data.name || 'BTN';
-                const state = data.state || '';
-                const el = document.getElementById('btn-log');
-                el.innerText = `${name} ${state}`;
-                // briefly highlight
-                el.style.color = '#3b82f6';
-                setTimeout(() => el.style.color = '', 500);
+                // Handle dialpad button events
+                const btn = dialpadButtons[data.name];
+                if (btn) {
+                    if (data.state === "PRESSED") {
+                        btn.classList.add('pressed');
+                    } else {
+                        btn.classList.remove('pressed');
+                    }
+                }
             }
         };
 
@@ -485,6 +510,8 @@ def start_app():
 
 if __name__ == '__main__':
     app = start_app()
-    bind_host = '10.10.101.133'
+    #bind_host = '10.10.101.133'
+    bind_host = '127.0.0.1'
+
     print(f"[*] Starting web receiver on {bind_host}:{WEB_PORT}")
     web.run_app(app, host=bind_host, port=WEB_PORT)
