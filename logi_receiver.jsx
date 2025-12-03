@@ -104,13 +104,13 @@ if (typeof JSON === 'undefined') {
     sensGroup.add("statictext", undefined, "Big Dial:");
     var sensInput = sensGroup.add("edittext", undefined, "0.1");
     sensInput.characters = 8;
-    sensGroup.add("statictext", undefined, "(coarse)");
+    sensGroup.add("statictext", undefined, "(property)");
     
     var sensGroup2 = sensPanel.add("group");
     sensGroup2.add("statictext", undefined, "Small Dial:");
-    var sensInputSmall = sensGroup2.add("edittext", undefined, "0.01");
-    sensInputSmall.characters = 8;
-    sensGroup2.add("statictext", undefined, "(fine)");
+    var sensInputTimeline = sensGroup2.add("edittext", undefined, "1");
+    sensInputTimeline.characters = 8;
+    sensGroup2.add("statictext", undefined, "(frames)");
     
     // Buttons
     var buttonPanel = win.add("panel", undefined, "Controls");
@@ -580,6 +580,22 @@ if (typeof JSON === 'undefined') {
             lastDialValue = dialValue;
             lastSmallDialValue = smallDialValue;
             
+            // Handle small dial - timeline scrubbing (always active)
+            if (smallDialDelta !== 0) {
+                var timelineSensitivity = parseFloat(sensInputTimeline.text) || 1;
+                var frameDelta = smallDialDelta * timelineSensitivity;
+                var frameTime = comp.frameDuration;
+                var newTime = comp.time + (frameDelta * frameTime);
+                // Clamp to comp duration
+                newTime = Math.max(0, Math.min(comp.duration - frameTime, newTime));
+                comp.time = newTime;
+            }
+            
+            // Big dial controls property - skip if no change
+            if (dialDelta === 0) {
+                return;
+            }
+            
             // Get current value
             var currentValue;
             try {
@@ -590,7 +606,7 @@ if (typeof JSON === 'undefined') {
             }
             
             // Skip first read (just sync and display)
-            if (dialDelta === 0 && smallDialDelta === 0) {
+            if (dialDelta === 0) {
                 if (typeof currentValue === "number") {
                     valDisplay.text = currentValue.toFixed(2);
                 } else if (currentValue instanceof Array) {
@@ -602,19 +618,32 @@ if (typeof JSON === 'undefined') {
                 return;
             }
             
-            // Calculate combined delta from both dials
+            // Calculate delta from big dial only
             var bigSensitivity = parseFloat(sensInput.text) || 0.1;
-            var smallSensitivity = parseFloat(sensInputSmall.text) || 0.01;
-            var delta = (dialDelta * bigSensitivity) + (smallDialDelta * smallSensitivity);
+            var delta = dialDelta * bigSensitivity;
             
             try {
+                // Check if property has keyframes
+                var hasKeyframes = false;
+                try {
+                    hasKeyframes = prop.numKeys > 0;
+                } catch (e) {}
+                
                 // Try to handle ANY property type
                 if (typeof currentValue === "number") {
                     // Simple number
                     var newValue = currentValue + delta;
-                    prop.setValue(newValue);
-                    valDisplay.text = newValue.toFixed(2);
-                    statusText.text = propInfo.name + ": " + newValue.toFixed(2);
+                    
+                    if (hasKeyframes) {
+                        // Add or update keyframe at current time
+                        prop.setValueAtTime(comp.time, newValue);
+                        valDisplay.text = newValue.toFixed(2) + " [K]";
+                        statusText.text = propInfo.name + ": " + newValue.toFixed(2) + " (keyframe)";
+                    } else {
+                        prop.setValue(newValue);
+                        valDisplay.text = newValue.toFixed(2);
+                        statusText.text = propInfo.name + ": " + newValue.toFixed(2);
+                    }
                     
                 } else if (currentValue instanceof Array && currentValue.length > 0) {
                     // Array - adjust first component
@@ -626,9 +655,17 @@ if (typeof JSON === 'undefined') {
                         } else {
                             newArr[0] = newArr[0] + delta;
                         }
-                        prop.setValue(newArr);
-                        valDisplay.text = "[" + newArr[0].toFixed(2) + ", ...]";
-                        statusText.text = propInfo.name + "[0]: " + newArr[0].toFixed(2);
+                        
+                        if (hasKeyframes) {
+                            // Add or update keyframe at current time
+                            prop.setValueAtTime(comp.time, newArr);
+                            valDisplay.text = "[" + newArr[0].toFixed(2) + ", ...] [K]";
+                            statusText.text = propInfo.name + "[0]: " + newArr[0].toFixed(2) + " (keyframe)";
+                        } else {
+                            prop.setValue(newArr);
+                            valDisplay.text = "[" + newArr[0].toFixed(2) + ", ...]";
+                            statusText.text = propInfo.name + "[0]: " + newArr[0].toFixed(2);
+                        }
                     } else {
                         statusText.text = "Array[0] not numeric";
                     }

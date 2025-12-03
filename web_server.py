@@ -353,6 +353,7 @@ HTML_CONTENT = """
 
         ws.onmessage = (event) => {
             const data = JSON.parse(event.data);
+            const delta = data.delta || 0;
             
             // Handle keypad button events (BTN ctrl with numeric name like "1", "2", etc.)
             if (data.ctrl === "KEYPAD") {
@@ -360,7 +361,6 @@ HTML_CONTENT = """
                 const btn = keypadButtons[btnNum];
                 if (btn) {
                     if (data.state === "PRESSED") {
-
                         btn.classList.add('pressed');
                     } else {
                         btn.classList.remove('pressed');
