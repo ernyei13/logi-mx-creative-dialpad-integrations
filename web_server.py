@@ -510,8 +510,12 @@ def start_app():
 
 if __name__ == '__main__':
     app = start_app()
-    #bind_host = '10.10.101.133'
-    bind_host = '127.0.0.1'
+    bind_host = '10.10.101.133'
+    bind_host_local = '127.0.0.1'
+    choice = input(f"press 1 to bind to local host ({bind_host_local}), any other key to bind to {bind_host}: ")
+
+    if choice == '1':
+        bind_host = bind_host_local
 
     print(f"[*] Starting web receiver on {bind_host}:{WEB_PORT}")
     web.run_app(app, host=bind_host, port=WEB_PORT)
