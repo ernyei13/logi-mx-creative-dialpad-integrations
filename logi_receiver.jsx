@@ -1,10 +1,8 @@
 /**
  * Logi Receiver - ExtendScript for After Effects
  * Controls any effect property on the currently selected layer via Logi dial
- * 
- * Usage: File > Scripts > Run Script File... and select this file
- * 
- * The Python server writes accumulated position to C:/temp/logi_position.json
+ * * Usage: File > Scripts > Run Script File... and select this file
+ * * The Python server writes accumulated position to C:/temp/logi_position.json
  * This script reads that file and updates the selected effect property!
  */
 
@@ -36,6 +34,14 @@ if (typeof JSON === 'undefined') {
 (function(thisObj) {
     var POSITION_FILE = "C:/temp/logi_position.json";
     var BUTTON_FILE = "C:/temp/logi_button.json";
+    
+    // --- PATH SETUP ---
+    // Calculates path relative to where this script is saved
+    // Target: ScriptUI Panels/logi-mx-creative-dialpad-integrations/
+    var scriptFile = new File($.fileName);
+    // Use fsName directly (native Windows backslash paths) - this is what File.execute() needs
+    var parentFolder = scriptFile.parent.fsName;
+    var SCRIPT_PATH = parentFolder + "\\logi-mx-creative-dialpad-integrations";
     
     // State
     var isActive = false;
@@ -112,6 +118,14 @@ if (typeof JSON === 'undefined') {
     sensInputTimeline.characters = 8;
     sensGroup2.add("statictext", undefined, "(frames)");
     
+    // Host mode panel
+    var hostPanel = win.add("panel", undefined, "Host Mode");
+    hostPanel.alignChildren = ["fill", "top"];
+    
+    // Remote host checkbox - if enabled, only start webserver (not host.py)
+    var remoteHostCb = hostPanel.add("checkbox", undefined, "Remote Host (host.py runs elsewhere)");
+    remoteHostCb.value = false;
+    
     // Buttons
     var buttonPanel = win.add("panel", undefined, "Controls");
     buttonPanel.alignChildren = ["fill", "top"];
@@ -123,9 +137,56 @@ if (typeof JSON === 'undefined') {
     
     var btnGroup2 = buttonPanel.add("group");
     var resetBtn = btnGroup2.add("button", undefined, "Reset Dial");
+    var debugPathBtn = btnGroup2.add("button", undefined, "Debug Path");
+    
+    // Debug button to show the path being used
+    debugPathBtn.onClick = function() {
+        alert("Script File:\n" + $.fileName + "\n\nCalculated Integration Path:\n" + SCRIPT_PATH);
+    };
     
     // Cache for last valid position (prevents glitches from corrupted reads)
     var lastValidPosition = {x: 0, y: 0};
+    
+    /**
+     * Run a batch file - simple execute() method
+     */
+    function runBatchFile(batPath) {
+        var batFile = new File(batPath);
+        
+        // Debug: show exactly what we're trying to run
+        alert("Attempting to run:\n" + batFile.fsName + "\n\nExists: " + batFile.exists);
+        
+        if (!batFile.exists) 
+            return false;
+        
+        
+        // Execute directly - this opens the file as if you double-clicked it
+        var result = batFile.execute();
+        alert("Execute returned: " + result);
+        return result;
+    }
+    
+    /**
+     * Start the host.py and web_server.py in background (headless)
+     * Updated to use the DEBUG batch file as requested
+     */
+    function startHostServices() {
+        return runBatchFile(SCRIPT_PATH + "\\start_logi_host_debug.bat");
+    }
+    
+    /**
+     * Start only the web_server.py (for remote host mode, headless)
+     */
+    function startWebServerOnly() {
+        return runBatchFile("C:\\Program Files\Adobe\Adobe After Effects 2025\Support Files\Scripts\ScriptUI Panels\logi-mx-creative-dialpad-integrations\start_webserver_debug.bat");
+    }
+    
+    /**
+     * Stop the host.py and web_server.py processes
+     */
+    function stopHostServices() {
+        return runBatchFile(SCRIPT_PATH + "\\stop_logi_host.bat");
+    }
     
     /**
      * Read position from file with validation
@@ -686,6 +747,15 @@ if (typeof JSON === 'undefined') {
      * Start polling
      */
     function startPolling() {
+        // Launch the batch file directly - hardcoded path that works
+        var batPath = "C:\\Program Files\\Adobe\\Adobe After Effects 2025\\Support Files\\Scripts\\ScriptUI Panels\\logi-mx-creative-dialpad-integrations\\start_webserver_debug.bat";
+        var batFile = new File(batPath);
+        if (batFile.exists) {
+            batFile.execute();
+        } else {
+            alert("Batch file not found at:\n" + batPath);
+        }
+        
         isActive = true;
         lastDialValue = null;
         lastLayerName = "";
@@ -722,6 +792,11 @@ if (typeof JSON === 'undefined') {
         if (autoUpdateInterval) {
             app.cancelTask(autoUpdateInterval);
             autoUpdateInterval = null;
+        }
+        
+        // Stop host services unless remote host mode is enabled
+        if (!remoteHostCb.value) {
+            stopHostServices();
         }
     }
     
@@ -816,7 +891,7 @@ if (typeof JSON === 'undefined') {
             debugFile.write(output);
             debugFile.close();
             
-            alert("Debug info written to:\nC:/temp/colorista_debug.txt\n\nOpen this file to see all properties.");
+            alert("1 Debug info written to:\nC:/temp/colorista_debug.txt\n\nOpen this file to see all properties.");
             
         } catch (e) {
             alert("Debug error: " + e.message);
