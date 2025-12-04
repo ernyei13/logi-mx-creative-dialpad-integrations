@@ -52,6 +52,8 @@ if (typeof JSON === 'undefined') {
     var currentEffects = [];
     var currentProperties = [];
     var lastButtonTimestamp = 0;  // Track button events to avoid duplicates
+    var mappingsCache = {};  // In-memory cache: { "EffectName": { buttons: {...} }, ... }
+    var isLoadingMappings = false;  // Flag to prevent auto-save while loading
     
     // Build UI - support both dockable panel and floating window
     function buildUI(thisObj) {
@@ -60,11 +62,32 @@ if (typeof JSON === 'undefined') {
     }
     
     var win = buildUI(thisObj);
-    win.orientation = "column";
-    win.alignChildren = ["fill", "top"];
+    win.orientation = "row";
+    win.alignChildren = ["fill", "fill"];
+    win.spacing = 0;
+    win.margins = 4;
+    
+    // Main content group (will be scrolled)
+    var contentGroup = win.add("group");
+    contentGroup.orientation = "column";
+    contentGroup.alignChildren = ["fill", "top"];
+    contentGroup.alignment = ["fill", "fill"];
+    contentGroup.spacing = 4;
+    
+    // Scrollbar
+    var scrollbar = win.add("scrollbar", undefined, 0, 0, 100);
+    scrollbar.preferredSize = [16, -1];
+    scrollbar.alignment = ["right", "fill"];
+    
+    // Inner content container that moves up/down
+    var scrollContent = contentGroup.add("group");
+    scrollContent.orientation = "column";
+    scrollContent.alignChildren = ["fill", "top"];
+    scrollContent.alignment = ["fill", "top"];
+    scrollContent.spacing = 4;
     
     // Status
-    var statusPanel = win.add("panel", undefined, "Status");
+    var statusPanel = scrollContent.add("panel", undefined, "Status");
     statusPanel.alignChildren = ["fill", "top"];
     var statusText = statusPanel.add("statictext", undefined, "Select a layer to see its effects");
     statusText.characters = 50;
@@ -81,7 +104,7 @@ if (typeof JSON === 'undefined') {
     valDisplay.characters = 15;
     
     // Effect/Property Selection
-    var targetPanel = win.add("panel", undefined, "Target Effect & Property");
+    var targetPanel = scrollContent.add("panel", undefined, "Target Effect & Property");
     targetPanel.alignChildren = ["fill", "top"];
     
     // Effect dropdown
@@ -103,7 +126,7 @@ if (typeof JSON === 'undefined') {
     var debugBtn = targetPanel.add("button", undefined, "Debug: List ALL Properties");
     
     // Sensitivity
-    var sensPanel = win.add("panel", undefined, "Settings");
+    var sensPanel = scrollContent.add("panel", undefined, "Settings");
     sensPanel.alignChildren = ["fill", "top"];
     
     var sensGroup = sensPanel.add("group");
@@ -118,8 +141,56 @@ if (typeof JSON === 'undefined') {
     sensInputTimeline.characters = 8;
     sensGroup2.add("statictext", undefined, "(frames)");
     
+    // Keypad Mapping Panel
+    var keypadPanel = scrollContent.add("panel", undefined, "Keypad Button Mapping");
+    keypadPanel.alignChildren = ["fill", "top"];
+    
+    // Button mapping dropdowns - 9 buttons on the keypad (3x3 grid)
+    // Buttons 1-6 are for property mapping
+    // Buttons 7-8-9 are special: 7=prev keyframe, 8=add keyframe, 9=next keyframe
+    var keypadButtons = ["1", "2", "3", "4", "5", "6", "7", "8", "9"];
+    var keypadDropdowns = [];
+    var keypadMappings = {}; // Maps button name to property index
+    
+    // Create first 2 rows (buttons 1-6) with dropdowns for property mapping
+    for (var row = 0; row < 2; row++) {
+        var rowGroup = keypadPanel.add("group");
+        rowGroup.orientation = "row";
+        rowGroup.alignChildren = ["left", "center"];
+        
+        for (var col = 0; col < 3; col++) {
+            var btnIdx = row * 3 + col;
+            var btnName = keypadButtons[btnIdx];
+            
+            var btnGroup = rowGroup.add("group");
+            btnGroup.orientation = "row";
+            btnGroup.add("statictext", undefined, "[" + btnName + "]");
+            
+            var dropdown = btnGroup.add("dropdownlist", undefined, ["(none)"]);
+            dropdown.preferredSize = [120, 22];
+            dropdown.selection = 0;
+            dropdown.buttonName = btnName; // Store button name for reference
+            
+            keypadDropdowns.push(dropdown);
+        }
+    }
+    
+    // Row 3: Special keyframe buttons (7, 8, 9) - just labels, no dropdowns
+    var specialRowGroup = keypadPanel.add("group");
+    specialRowGroup.orientation = "row";
+    specialRowGroup.alignChildren = ["left", "center"];
+    specialRowGroup.add("statictext", undefined, "[7] Prev KF");
+    specialRowGroup.add("statictext", undefined, "   [8] Add KF");
+    specialRowGroup.add("statictext", undefined, "   [9] Next KF");
+    
+    // Save/Load mapping buttons
+    var mappingBtnGroup = keypadPanel.add("group");
+    mappingBtnGroup.orientation = "row";
+    var saveMappingBtn = mappingBtnGroup.add("button", undefined, "Save Mapping");
+    var loadMappingBtn = mappingBtnGroup.add("button", undefined, "Load Mapping");
+    
     // Host mode panel
-    var hostPanel = win.add("panel", undefined, "Host Mode");
+    var hostPanel = scrollContent.add("panel", undefined, "Host Mode");
     hostPanel.alignChildren = ["fill", "top"];
     
     // Remote host checkbox - if enabled, only start webserver (not host.py)
@@ -127,7 +198,7 @@ if (typeof JSON === 'undefined') {
     remoteHostCb.value = false;
     
     // Buttons
-    var buttonPanel = win.add("panel", undefined, "Controls");
+    var buttonPanel = scrollContent.add("panel", undefined, "Controls");
     buttonPanel.alignChildren = ["fill", "top"];
     
     var btnGroup1 = buttonPanel.add("group");
@@ -183,9 +254,25 @@ if (typeof JSON === 'undefined') {
     
     /**
      * Stop the host.py and web_server.py processes
+     * Uses taskkill directly via system.callSystem
      */
     function stopHostServices() {
-        return runBatchFile(SCRIPT_PATH + "\\stop_logi_host.bat");
+        try {
+            // Kill python processes running web_server.py
+            system.callSystem('taskkill /F /FI "WINDOWTITLE eq Logi Web Server*"');
+            system.callSystem('taskkill /F /FI "WINDOWTITLE eq Logi Host*"');
+            // Kill by image name and command line pattern
+            system.callSystem('cmd /c "FOR /F \\"tokens=2 delims=,\\" %i IN (\'tasklist /FI \\"IMAGENAME eq python.exe\\" /FO CSV /NH\') DO @wmic process where \\"ProcessId=%~i and CommandLine like \'%%web_server.py%%\'\\" call terminate >nul 2>&1"');
+            return true;
+        } catch (e) {
+            // Fallback: try running the batch file
+            var batPath = "C:\\Program Files\\Adobe\\Adobe After Effects 2025\\Support Files\\Scripts\\ScriptUI Panels\\logi-mx-creative-dialpad-integrations\\stop_logi_host.bat";
+            var batFile = new File(batPath);
+            if (batFile.exists) {
+                batFile.execute();
+            }
+            return false;
+        }
     }
     
     /**
@@ -389,6 +476,8 @@ if (typeof JSON === 'undefined') {
             
             // Populate properties for first effect
             populateProperties();
+            updateKeypadDropdowns();
+            autoLoadMappings(); // Restore saved mappings for this effect
             
         } catch (e) {
             statusText.text = "Error: " + e.message;
@@ -429,9 +518,255 @@ if (typeof JSON === 'undefined') {
         propDropdown.selection = 0;
     }
     
+    /**
+     * Update keypad button dropdowns with current properties
+     */
+    function updateKeypadDropdowns() {
+        isLoadingMappings = true;  // Prevent auto-save during update
+        
+        for (var i = 0; i < keypadDropdowns.length; i++) {
+            var dropdown = keypadDropdowns[i];
+            var currentSelection = dropdown.selection ? dropdown.selection.index : 0;
+            
+            dropdown.removeAll();
+            dropdown.add("item", "(none)");
+            
+            for (var j = 0; j < currentProperties.length; j++) {
+                dropdown.add("item", currentProperties[j].name);
+            }
+            
+            // Restore selection if valid
+            if (currentSelection > 0 && currentSelection <= currentProperties.length) {
+                dropdown.selection = currentSelection;
+            } else {
+                dropdown.selection = 0;
+            }
+        }
+        
+        isLoadingMappings = false;  // Re-enable auto-save
+    }
+    
+    // Mappings folder path
+    var MAPPINGS_FOLDER = "C:/Program Files/Adobe/Adobe After Effects 2025/Support Files/Scripts/ScriptUI Panels/logi-mx-creative-dialpad-integrations/mappings";
+    
+    /**
+     * Ensure mappings folder exists
+     */
+    function ensureMappingsFolder() {
+        var folder = new Folder(MAPPINGS_FOLDER);
+        if (!folder.exists) {
+            folder.create();
+        }
+    }
+    
+    /**
+     * Get a safe filename for an effect (remove special characters)
+     */
+    function getEffectFileName(effectName) {
+        return effectName.replace(/[^a-zA-Z0-9]/g, "_") + ".json";
+    }
+    
+    /**
+     * Auto-save current mappings to JSON file and in-memory cache
+     */
+    function autoSaveMappings() {
+        // Don't save if we're currently loading mappings (programmatic changes)
+        if (isLoadingMappings) return;
+        
+        try {
+            var effectIdx = effectDropdown.selection ? effectDropdown.selection.index : -1;
+            if (effectIdx < 0 || effectIdx >= currentEffects.length) return;
+            
+            var effectName = currentEffects[effectIdx].name;
+            var fileName = getEffectFileName(effectName);
+            
+            var mappings = {
+                effectName: effectName,
+                buttons: {}
+            };
+            
+            for (var i = 0; i < keypadDropdowns.length; i++) {
+                var dropdown = keypadDropdowns[i];
+                var btnName = keypadButtons[i];
+                var propIdx = dropdown.selection ? dropdown.selection.index : 0;
+                
+                if (propIdx > 0 && propIdx <= currentProperties.length) {
+                    mappings.buttons[btnName] = currentProperties[propIdx - 1].name;
+                }
+            }
+            
+            // Save to in-memory cache
+            mappingsCache[effectName] = mappings;
+            
+            // Save to file
+            ensureMappingsFolder();
+            var saveFile = new File(MAPPINGS_FOLDER + "/" + fileName);
+            saveFile.open("w");
+            saveFile.write(JSON.stringify(mappings));
+            saveFile.close();
+        } catch (e) {}
+    }
+    
+    /**
+     * Auto-load mappings from cache first, then JSON file for current effect
+     */
+    function autoLoadMappings() {
+        isLoadingMappings = true;  // Prevent auto-save during loading
+        
+        try {
+            var effectIdx = effectDropdown.selection ? effectDropdown.selection.index : -1;
+            if (effectIdx < 0 || effectIdx >= currentEffects.length) {
+                isLoadingMappings = false;
+                return;
+            }
+            
+            var effectName = currentEffects[effectIdx].name;
+            var mappings = null;
+            
+            // First check in-memory cache
+            if (mappingsCache[effectName]) {
+                mappings = mappingsCache[effectName];
+            } else {
+                // Load from file if not in cache
+                var fileName = getEffectFileName(effectName);
+                var loadFile = new File(MAPPINGS_FOLDER + "/" + fileName);
+                if (loadFile.exists) {
+                    loadFile.open("r");
+                    var content = loadFile.read();
+                    loadFile.close();
+                    mappings = JSON.parse(content);
+                    // Store in cache for future use
+                    mappingsCache[effectName] = mappings;
+                }
+            }
+            
+            if (!mappings) {
+                isLoadingMappings = false;
+                return;
+            }
+            
+            // Apply mappings to dropdowns
+            for (var i = 0; i < keypadDropdowns.length; i++) {
+                var dropdown = keypadDropdowns[i];
+                var btnName = keypadButtons[i];
+                
+                if (mappings.buttons && mappings.buttons[btnName]) {
+                    var propName = mappings.buttons[btnName];
+                    
+                    // Find matching property by name
+                    var found = false;
+                    for (var j = 0; j < currentProperties.length; j++) {
+                        if (currentProperties[j].name === propName) {
+                            dropdown.selection = j + 1;
+                            found = true;
+                            break;
+                        }
+                    }
+                    
+                    if (!found) {
+                        dropdown.selection = 0;
+                    }
+                } else {
+                    dropdown.selection = 0;
+                }
+            }
+            
+            statusText.text = "Loaded mapping for: " + effectName;
+        } catch (e) {}
+        
+        isLoadingMappings = false;  // Re-enable auto-save
+    }
+    
+    /**
+     * Save keypad mappings to a JSON file (manual export)
+     */
+    function saveKeypadMappings() {
+        var effectIdx = effectDropdown.selection ? effectDropdown.selection.index : -1;
+        if (effectIdx < 0 || effectIdx >= currentEffects.length) {
+            alert("No effect selected");
+            return;
+        }
+        
+        // Just call autoSave which saves to the mappings folder
+        autoSaveMappings();
+        statusText.text = "Mapping saved for: " + currentEffects[effectIdx].name;
+    }
+    
+    /**
+     * Load keypad mappings from the mappings folder (shows file picker in that folder)
+     */
+    function loadKeypadMappings() {
+        ensureMappingsFolder();
+        var folder = new Folder(MAPPINGS_FOLDER);
+        var loadFile = File.openDialog("Load Keypad Mapping", "JSON Files:*.json", false);
+        if (!loadFile) return;
+        
+        try {
+            loadFile.open("r");
+            var content = loadFile.read();
+            loadFile.close();
+            
+            var mappings = JSON.parse(content);
+            
+            // Apply mappings to dropdowns (only buttons 1-6)
+            for (var i = 0; i < keypadDropdowns.length; i++) {
+                var dropdown = keypadDropdowns[i];
+                var btnName = keypadButtons[i];
+                
+                // Handle both old format (with propertyName) and new format (direct name)
+                var propName = null;
+                if (mappings.buttons && mappings.buttons[btnName]) {
+                    if (typeof mappings.buttons[btnName] === "string") {
+                        propName = mappings.buttons[btnName];
+                    } else if (mappings.buttons[btnName].propertyName) {
+                        propName = mappings.buttons[btnName].propertyName;
+                    }
+                }
+                
+                if (propName) {
+                    // Find matching property by name
+                    var found = false;
+                    for (var j = 0; j < currentProperties.length; j++) {
+                        if (currentProperties[j].name === propName) {
+                            dropdown.selection = j + 1;
+                            found = true;
+                            break;
+                        }
+                    }
+                    
+                    if (!found) {
+                        dropdown.selection = 0;
+                    }
+                } else {
+                    dropdown.selection = 0;
+                }
+            }
+            
+            // Also save to the auto-save location
+            autoSaveMappings();
+            
+            statusText.text = "Mapping loaded: " + (mappings.effectName || "Unknown effect");
+        } catch (e) {
+            alert("Error loading mapping: " + e.message);
+        }
+    }
+    
+    // Auto-save when dropdown selection changes
+    for (var i = 0; i < keypadDropdowns.length; i++) {
+        keypadDropdowns[i].onChange = function() {
+            autoSaveMappings();
+        };
+    }
+    
+    // Save/Load button handlers
+    saveMappingBtn.onClick = saveKeypadMappings;
+    loadMappingBtn.onClick = loadKeypadMappings;
+    
     // Effect dropdown change handler
     effectDropdown.onChange = function() {
         populateProperties();
+        updateKeypadDropdowns();
+        autoLoadMappings(); // Load saved mappings for this effect
         lastDialValue = null;
     };
     
@@ -482,7 +817,7 @@ if (typeof JSON === 'undefined') {
     }
     
     /**
-     * Check for button presses and navigate properties/layers
+     * Check for button presses and navigate effects/layers/properties
      */
     function checkButtons() {
         var btnData = readButtonFile();
@@ -496,29 +831,31 @@ if (typeof JSON === 'undefined') {
         // Only handle press events, not releases
         if (!btnData.pressed) return;
         
-        // TOP buttons: navigate properties
+        // TOP buttons: navigate EFFECTS (changed from properties)
         if (btnData.button === "TOP RIGHT" || btnData.button === "TOP LEFT") {
-            var currentIdx = propDropdown.selection ? propDropdown.selection.index : 0;
+            var currentIdx = effectDropdown.selection ? effectDropdown.selection.index : 0;
             var newIdx = currentIdx;
             
             if (btnData.button === "TOP RIGHT") {
-                // Next property
+                // Next effect
                 newIdx = currentIdx + 1;
-                if (newIdx >= currentProperties.length) {
+                if (newIdx >= currentEffects.length) {
                     newIdx = 0; // Wrap around
                 }
             } else if (btnData.button === "TOP LEFT") {
-                // Previous property
+                // Previous effect
                 newIdx = currentIdx - 1;
                 if (newIdx < 0) {
-                    newIdx = currentProperties.length - 1; // Wrap around
+                    newIdx = currentEffects.length - 1; // Wrap around
                 }
             }
             
-            if (newIdx !== currentIdx && currentProperties.length > 0) {
-                propDropdown.selection = newIdx;
-                lastDialValue = null; // Reset dial tracking for new property
-                statusText.text = "Property: " + currentProperties[newIdx].name;
+            if (newIdx !== currentIdx && currentEffects.length > 0) {
+                effectDropdown.selection = newIdx;
+                populateProperties();
+                updateKeypadDropdowns();
+                lastDialValue = null; // Reset dial tracking for new effect
+                statusText.text = "Effect: " + currentEffects[newIdx].name;
             }
         }
         
@@ -552,6 +889,125 @@ if (typeof JSON === 'undefined') {
                 }
             } catch (e) {
                 statusText.text = "Layer switch error: " + e.message;
+            }
+        }
+        
+        // KEYPAD buttons 1-6: select mapped property
+        if (btnData.button === "1" || btnData.button === "2" || btnData.button === "3" ||
+            btnData.button === "4" || btnData.button === "5" || btnData.button === "6") {
+            
+            var keypadButtonIndex = parseInt(btnData.button) - 1; // Convert "1"-"6" to 0-5
+            
+            if (keypadButtonIndex >= 0 && keypadButtonIndex < keypadDropdowns.length) {
+                var dropdown = keypadDropdowns[keypadButtonIndex];
+                var propIdx = dropdown.selection ? dropdown.selection.index : 0;
+                
+                // propIdx 0 = "(none)", so valid properties start at index 1
+                if (propIdx > 0 && propIdx <= currentProperties.length) {
+                    propDropdown.selection = propIdx - 1;
+                    lastDialValue = null;
+                    statusText.text = "Property: " + currentProperties[propIdx - 1].name;
+                }
+            }
+        }
+        
+        // KEYPAD button 7: Jump to previous keyframe
+        if (btnData.button === "7") {
+            try {
+                var propIdx = propDropdown.selection ? propDropdown.selection.index : -1;
+                if (propIdx >= 0 && propIdx < currentProperties.length) {
+                    var prop = currentProperties[propIdx].prop;
+                    var comp = app.project.activeItem;
+                    
+                    if (prop.numKeys > 0) {
+                        // Find the keyframe before current time
+                        var nearestKey = prop.nearestKeyIndex(comp.time);
+                        var keyTime = prop.keyTime(nearestKey);
+                        
+                        if (keyTime >= comp.time && nearestKey > 1) {
+                            // Current time is at or after this key, go to previous
+                            comp.time = prop.keyTime(nearestKey - 1);
+                        } else if (keyTime < comp.time) {
+                            // Current time is after this key, go to it
+                            comp.time = keyTime;
+                        } else if (nearestKey > 1) {
+                            comp.time = prop.keyTime(nearestKey - 1);
+                        }
+                        statusText.text = "Jumped to previous keyframe";
+                    } else {
+                        statusText.text = "No keyframes on this property";
+                    }
+                }
+            } catch (e) {
+                statusText.text = "Keyframe nav error: " + e.message;
+            }
+        }
+        
+        // KEYPAD button 8: Toggle keyframe at current time (add or remove)
+        if (btnData.button === "8") {
+            try {
+                var propIdx = propDropdown.selection ? propDropdown.selection.index : -1;
+                if (propIdx >= 0 && propIdx < currentProperties.length) {
+                    var prop = currentProperties[propIdx].prop;
+                    var comp = app.project.activeItem;
+                    var currentTime = comp.time;
+                    
+                    // Check if there's a keyframe at current time
+                    var keyAtTime = -1;
+                    if (prop.numKeys > 0) {
+                        var nearestKey = prop.nearestKeyIndex(currentTime);
+                        var keyTime = prop.keyTime(nearestKey);
+                        // Check if keyframe is at current time (within small tolerance)
+                        if (Math.abs(keyTime - currentTime) < 0.001) {
+                            keyAtTime = nearestKey;
+                        }
+                    }
+                    
+                    if (keyAtTime > 0) {
+                        // Remove existing keyframe
+                        prop.removeKey(keyAtTime);
+                        statusText.text = "Keyframe removed at " + currentTime.toFixed(2) + "s";
+                    } else {
+                        // Add keyframe at current time with current value
+                        var currentValue = prop.value;
+                        prop.setValueAtTime(currentTime, currentValue);
+                        statusText.text = "Keyframe added at " + currentTime.toFixed(2) + "s";
+                    }
+                }
+            } catch (e) {
+                statusText.text = "Keyframe toggle error: " + e.message;
+            }
+        }
+        
+        // KEYPAD button 9: Jump to next keyframe
+        if (btnData.button === "9") {
+            try {
+                var propIdx = propDropdown.selection ? propDropdown.selection.index : -1;
+                if (propIdx >= 0 && propIdx < currentProperties.length) {
+                    var prop = currentProperties[propIdx].prop;
+                    var comp = app.project.activeItem;
+                    
+                    if (prop.numKeys > 0) {
+                        // Find the keyframe after current time
+                        var nearestKey = prop.nearestKeyIndex(comp.time);
+                        var keyTime = prop.keyTime(nearestKey);
+                        
+                        if (keyTime <= comp.time && nearestKey < prop.numKeys) {
+                            // Current time is at or before this key, go to next
+                            comp.time = prop.keyTime(nearestKey + 1);
+                        } else if (keyTime > comp.time) {
+                            // Current time is before this key, go to it
+                            comp.time = keyTime;
+                        } else if (nearestKey < prop.numKeys) {
+                            comp.time = prop.keyTime(nearestKey + 1);
+                        }
+                        statusText.text = "Jumped to next keyframe";
+                    } else {
+                        statusText.text = "No keyframes on this property";
+                    }
+                }
+            } catch (e) {
+                statusText.text = "Keyframe nav error: " + e.message;
             }
         }
     }
@@ -786,7 +1242,7 @@ if (typeof JSON === 'undefined') {
         isActive = false;
         startBtn.enabled = true;
         stopBtn.enabled = false;
-        statusText.text = "Stopped. Click 'Start' to enable.";
+        statusText.text = "Stopping services...";
         valDisplay.text = "---";
         
         if (autoUpdateInterval) {
@@ -794,10 +1250,9 @@ if (typeof JSON === 'undefined') {
             autoUpdateInterval = null;
         }
         
-        // Stop host services unless remote host mode is enabled
-        if (!remoteHostCb.value) {
-            stopHostServices();
-        }
+        // Always stop the webserver (it runs locally)
+        stopHostServices();
+        statusText.text = "Stopped.";
     }
     
     /**
@@ -913,10 +1368,47 @@ if (typeof JSON === 'undefined') {
     // Initial population
     populateEffects();
     
+    // Scrolling logic
+    function updateScroll() {
+        try {
+            win.layout.layout(true);
+            var contentHeight = scrollContent.size ? scrollContent.size[1] : 500;
+            var viewHeight = contentGroup.size ? contentGroup.size[1] : 300;
+            
+            if (contentHeight > viewHeight) {
+                scrollbar.visible = true;
+                scrollbar.maxvalue = contentHeight - viewHeight;
+                scrollbar.jumpdelta = viewHeight * 0.8;
+                scrollbar.stepdelta = 30;
+            } else {
+                scrollbar.visible = false;
+                scrollbar.value = 0;
+                scrollContent.location = [0, 0];
+            }
+        } catch (e) {}
+    }
+    
+    scrollbar.onChanging = scrollbar.onChange = function() {
+        try {
+            scrollContent.location = [0, -scrollbar.value];
+        } catch (e) {}
+    };
+    
+    // Handle resizing for dockable panels
+    win.onResizing = win.onResize = function() {
+        this.layout.resize();
+        updateScroll();
+    };
+    
     // Show window (only for non-dockable panels)
     if (win instanceof Window) {
+        win.center();
         win.show();
     } else {
         win.layout.layout(true);
     }
+    
+    // Initial scroll setup (delayed to ensure layout is complete)
+    app.scheduleTask("try { $.global.logiUpdateScroll(); } catch(e) {}", 100, false);
+    $.global.logiUpdateScroll = updateScroll;
 })(this);
