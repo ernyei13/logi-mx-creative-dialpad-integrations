@@ -1,0 +1,8 @@
+{
+    "effectName": "Exposure",
+    "buttons": {
+        "1": "Exposure",
+        "2": "Offset",
+        "3": "Gamma Correction"
+    }
+}

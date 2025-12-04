@@ -1,0 +1,11 @@
+{
+    "effectName": "Colorista V",
+    "buttons": {
+        "1": "Exposure",
+        "2": "Contrast",
+        "3": "Temp",
+        "4": "Tint",
+        "5": "Gamma",
+        "6": "Sat"
+    }
+}

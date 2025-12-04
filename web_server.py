@@ -452,7 +452,7 @@ async def bridge_handler(request):
                 try:
                     data = json.loads(payload)
                     
-                    # Handle button events (ctrl: "BTN", name: "...", state: "PRESSED"/"RELEASED")
+                    # Handle dialpad button events (ctrl: "BTN", name: "...", state: "PRESSED"/"RELEASED")
                     if data.get('ctrl') == 'BTN':
                         button_name = data.get('name', '')
                         pressed = data.get('state') == 'PRESSED'
@@ -461,6 +461,16 @@ async def bridge_handler(request):
                             print(f"[*] Button: {button_name} {'PRESSED' if pressed else 'RELEASED'}")
                             # Write to file for ExtendScript
                             write_button_file(button_name, pressed)
+                    
+                    # Handle keypad button events (ctrl: "KEYPAD", button: 1-9, state: "PRESSED"/"RELEASED")
+                    elif data.get('ctrl') == 'KEYPAD':
+                        button_num = data.get('button', 0)
+                        button_name = str(button_num)  # "1", "2", etc.
+                        pressed = data.get('state') == 'PRESSED'
+                        print(f"[*] Keypad: {button_name} {'PRESSED' if pressed else 'RELEASED'}")
+                        # Write to file for ExtendScript
+                        write_button_file(button_name, pressed)
+                    
                     # Handle dial/scroller events
                     elif 'delta' in data:
                         last_slider_state.update(data)
