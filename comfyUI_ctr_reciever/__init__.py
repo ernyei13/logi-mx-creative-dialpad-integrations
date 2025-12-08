@@ -24,7 +24,10 @@ For continuous updates in ComfyUI:
 from .logi_dialpad_reciever import LogiDialpadReceiver
 from .logi_keypad_reciever import LogiKeypadReceiver
 from .lcxl_reciever import LCXLReceiver
-from .state_reader import ControllerStateReader, LCXLKnobReader, KeypadReader
+from .state_reader import (
+    ControllerStateReader, LCXLKnobReader, LCXLFaderReader, LCXLButtonReader, KeypadReader,
+    ValueDisplay, FaderDisplay, DialDisplay
+)
 
 NODE_CLASS_MAPPINGS = {
     "LogiDialpadReceiver": LogiDialpadReceiver,
@@ -32,7 +35,12 @@ NODE_CLASS_MAPPINGS = {
     "LCXLReceiver": LCXLReceiver,
     "ControllerStateReader": ControllerStateReader,
     "LCXLKnobReader": LCXLKnobReader,
+    "LCXLFaderReader": LCXLFaderReader,
+    "LCXLButtonReader": LCXLButtonReader,
     "KeypadReader": KeypadReader,
+    "ValueDisplay": ValueDisplay,
+    "FaderDisplay": FaderDisplay,
+    "DialDisplay": DialDisplay,
 }
 
 NODE_DISPLAY_NAME_MAPPINGS = {
@@ -40,8 +48,13 @@ NODE_DISPLAY_NAME_MAPPINGS = {
     "LogiKeypadReceiver": "Logi MX Keypad (WebSocket)",
     "LCXLReceiver": "Launch Control XL (WebSocket)",
     "ControllerStateReader": "Controller State (Dial + Faders)",
-    "LCXLKnobReader": "LCXL Knobs (24 knobs)",
+    "LCXLKnobReader": "LCXL Knobs (24)",
+    "LCXLFaderReader": "LCXL Faders (8)",
+    "LCXLButtonReader": "LCXL Buttons (16)",
     "KeypadReader": "Keypad Reader (9 buttons)",
+    "ValueDisplay": "Value Display",
+    "FaderDisplay": "Fader Display (8 bars)",
+    "DialDisplay": "Dial Display",
 }
 
 __all__ = ["NODE_CLASS_MAPPINGS", "NODE_DISPLAY_NAME_MAPPINGS"]

@@ -48,6 +48,12 @@ controller_state = {
     # LCXL Knobs Row C
     "knob_1c": 0.0, "knob_2c": 0.0, "knob_3c": 0.0, "knob_4c": 0.0,
     "knob_5c": 0.0, "knob_6c": 0.0, "knob_7c": 0.0, "knob_8c": 0.0,
+    # LCXL Focus buttons (top row)
+    "focus_1": False, "focus_2": False, "focus_3": False, "focus_4": False,
+    "focus_5": False, "focus_6": False, "focus_7": False, "focus_8": False,
+    # LCXL Control buttons (bottom row)
+    "ctrl_1": False, "ctrl_2": False, "ctrl_3": False, "ctrl_4": False,
+    "ctrl_5": False, "ctrl_6": False, "ctrl_7": False, "ctrl_8": False,
     # Timestamp
     "last_update": 0,
 }
@@ -818,12 +824,21 @@ async def bridge_handler(request):
                                 row = parts[2].lower()
                                 update_controller_state(f"knob_{knob_num}{row}", normalized)
                     
-                    # Handle MIDI Note events
+                    # Handle MIDI Note events (LCXL buttons)
                     elif data.get('ctrl') == 'MIDI_NOTE':
                         note = data.get('note', 0)
                         state = data.get('state', 'OFF')
                         name = data.get('name', f'Note_{note}')
+                        pressed = (state == 'ON')
                         print(f"[*] MIDI Note: {name} = {state}")
+                        # Update controller state for ComfyUI
+                        # BTN_FOCUS_1 through BTN_FOCUS_8, BTN_CTRL_1 through BTN_CTRL_8
+                        if name.startswith("BTN_FOCUS_"):
+                            btn_num = name.split("_")[2]
+                            update_controller_state(f"focus_{btn_num}", pressed)
+                        elif name.startswith("BTN_CTRL_"):
+                            btn_num = name.split("_")[2]
+                            update_controller_state(f"ctrl_{btn_num}", pressed)
                 except:
                     pass
                 # Relay to any connected browser clients

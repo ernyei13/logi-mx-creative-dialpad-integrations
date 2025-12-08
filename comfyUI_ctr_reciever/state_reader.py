@@ -114,7 +114,8 @@ class LCXLKnobReader:
     CATEGORY = "controller/midi"
     FUNCTION = "read"
     RETURN_TYPES = tuple(["FLOAT"] * 24)
-    RETURN_NAMES = tuple([f"knob_{i+1}{r}" for r in ['a', 'b', 'c'] for i in range(8)])
+    # Correct order: knob_1a through knob_8a, then knob_1b through knob_8b, then knob_1c through knob_8c
+    RETURN_NAMES = tuple([f"knob_{i}{r}" for r in ['a', 'b', 'c'] for i in range(1, 9)])
     
     @classmethod
     def INPUT_TYPES(cls):
@@ -127,10 +128,66 @@ class LCXLKnobReader:
     def read(self):
         state = read_state()
         knobs = []
+        # Match the RETURN_NAMES order: row a (1-8), row b (1-8), row c (1-8)
         for row in ['a', 'b', 'c']:
             for i in range(1, 9):
                 knobs.append(state.get(f"knob_{i}{row}", 0.0))
         return tuple(knobs)
+
+
+class LCXLFaderReader:
+    """Reads all 8 LCXL fader values from the state file."""
+    
+    CATEGORY = "controller/midi"
+    FUNCTION = "read"
+    RETURN_TYPES = tuple(["FLOAT"] * 8)
+    RETURN_NAMES = ("fader_1", "fader_2", "fader_3", "fader_4", "fader_5", "fader_6", "fader_7", "fader_8")
+    
+    @classmethod
+    def INPUT_TYPES(cls):
+        return {"required": {}}
+    
+    @classmethod
+    def IS_CHANGED(cls, **kwargs):
+        return float("nan")
+    
+    def read(self):
+        state = read_state()
+        faders = []
+        for i in range(1, 9):
+            faders.append(state.get(f"fader_{i}", 0.0))
+        return tuple(faders)
+
+
+class LCXLButtonReader:
+    """Reads all 16 LCXL button states from the state file (Focus + Control rows)."""
+    
+    CATEGORY = "controller/midi"
+    FUNCTION = "read"
+    RETURN_TYPES = tuple(["BOOLEAN"] * 16)
+    RETURN_NAMES = (
+        "focus_1", "focus_2", "focus_3", "focus_4", "focus_5", "focus_6", "focus_7", "focus_8",
+        "ctrl_1", "ctrl_2", "ctrl_3", "ctrl_4", "ctrl_5", "ctrl_6", "ctrl_7", "ctrl_8"
+    )
+    
+    @classmethod
+    def INPUT_TYPES(cls):
+        return {"required": {}}
+    
+    @classmethod
+    def IS_CHANGED(cls, **kwargs):
+        return float("nan")
+    
+    def read(self):
+        state = read_state()
+        buttons = []
+        # Focus row buttons
+        for i in range(1, 9):
+            buttons.append(state.get(f"focus_{i}", False))
+        # Control row buttons
+        for i in range(1, 9):
+            buttons.append(state.get(f"ctrl_{i}", False))
+        return tuple(buttons)
 
 
 class KeypadReader:
@@ -167,15 +224,132 @@ class KeypadReader:
         return (*buttons, any_pressed, last_pressed)
 
 
+class ValueDisplay:
+    """
+    Simple node to display any value in the node UI.
+    Connect any output to see its current value.
+    """
+    
+    CATEGORY = "controller/debug"
+    FUNCTION = "display"
+    RETURN_TYPES = ("STRING",)
+    RETURN_NAMES = ("text",)
+    OUTPUT_NODE = True
+    
+    @classmethod
+    def INPUT_TYPES(cls):
+        return {
+            "required": {
+                "value": ("*",),  # Accept any type
+            },
+            "optional": {
+                "label": ("STRING", {"default": "Value"}),
+            }
+        }
+    
+    @classmethod
+    def IS_CHANGED(cls, **kwargs):
+        return float("nan")
+    
+    def display(self, value, label="Value"):
+        text = f"{label}: {value}"
+        print(f"[Display] {text}")
+        return {"ui": {"text": [text]}, "result": (text,)}
+
+
+class FaderDisplay:
+    """
+    Visual display for 8 faders with bar representation.
+    """
+    
+    CATEGORY = "controller/debug"
+    FUNCTION = "display"
+    RETURN_TYPES = ("STRING",)
+    RETURN_NAMES = ("display",)
+    OUTPUT_NODE = True
+    
+    @classmethod
+    def INPUT_TYPES(cls):
+        return {
+            "required": {
+                "fader_1": ("FLOAT", {"default": 0.0, "min": 0.0, "max": 1.0}),
+                "fader_2": ("FLOAT", {"default": 0.0, "min": 0.0, "max": 1.0}),
+                "fader_3": ("FLOAT", {"default": 0.0, "min": 0.0, "max": 1.0}),
+                "fader_4": ("FLOAT", {"default": 0.0, "min": 0.0, "max": 1.0}),
+                "fader_5": ("FLOAT", {"default": 0.0, "min": 0.0, "max": 1.0}),
+                "fader_6": ("FLOAT", {"default": 0.0, "min": 0.0, "max": 1.0}),
+                "fader_7": ("FLOAT", {"default": 0.0, "min": 0.0, "max": 1.0}),
+                "fader_8": ("FLOAT", {"default": 0.0, "min": 0.0, "max": 1.0}),
+            }
+        }
+    
+    @classmethod
+    def IS_CHANGED(cls, **kwargs):
+        return float("nan")
+    
+    def display(self, fader_1, fader_2, fader_3, fader_4, fader_5, fader_6, fader_7, fader_8):
+        faders = [fader_1, fader_2, fader_3, fader_4, fader_5, fader_6, fader_7, fader_8]
+        lines = []
+        for i, val in enumerate(faders, 1):
+            bar_len = int(val * 20)
+            bar = "█" * bar_len + "░" * (20 - bar_len)
+            lines.append(f"F{i}: [{bar}] {val:.2f}")
+        text = "\n".join(lines)
+        return {"ui": {"text": [text]}, "result": (text,)}
+
+
+class DialDisplay:
+    """
+    Visual display for dial and scroller values.
+    """
+    
+    CATEGORY = "controller/debug"
+    FUNCTION = "display"
+    RETURN_TYPES = ("STRING",)
+    RETURN_NAMES = ("display",)
+    OUTPUT_NODE = True
+    
+    @classmethod
+    def INPUT_TYPES(cls):
+        return {
+            "required": {
+                "dial_value": ("INT", {"default": 0}),
+                "scroller_value": ("INT", {"default": 0}),
+            },
+            "optional": {
+                "dial_delta": ("INT", {"default": 0}),
+                "scroller_delta": ("INT", {"default": 0}),
+            }
+        }
+    
+    @classmethod
+    def IS_CHANGED(cls, **kwargs):
+        return float("nan")
+    
+    def display(self, dial_value, scroller_value, dial_delta=0, scroller_delta=0):
+        text = f"🎛️ Dial: {dial_value} (Δ{dial_delta:+d})\n📜 Scroller: {scroller_value} (Δ{scroller_delta:+d})"
+        return {"ui": {"text": [text]}, "result": (text,)}
+
+
 # Node registration
 NODE_CLASS_MAPPINGS = {
     "ControllerStateReader": ControllerStateReader,
     "LCXLKnobReader": LCXLKnobReader,
+    "LCXLFaderReader": LCXLFaderReader,
+    "LCXLButtonReader": LCXLButtonReader,
     "KeypadReader": KeypadReader,
+    "ValueDisplay": ValueDisplay,
+    "FaderDisplay": FaderDisplay,
+    "DialDisplay": DialDisplay,
 }
 
 NODE_DISPLAY_NAME_MAPPINGS = {
     "ControllerStateReader": "Controller State (Dial + Faders)",
-    "LCXLKnobReader": "LCXL Knobs (24 knobs)",
+    "LCXLKnobReader": "LCXL Knobs (24)",
+    "LCXLFaderReader": "LCXL Faders (8)",
+    "LCXLButtonReader": "LCXL Buttons (16)",
     "KeypadReader": "Keypad Reader (9 buttons)",
+    "ValueDisplay": "Value Display",
+    "FaderDisplay": "Fader Display (8 bars)",
+    "DialDisplay": "Dial Display",
 }
