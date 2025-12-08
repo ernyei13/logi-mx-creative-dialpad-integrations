@@ -2,6 +2,8 @@ import asyncio
 import json
 import time
 import os
+import platform
+import threading
 from aiohttp import web
 
 WEB_PORT = 8080
@@ -9,8 +11,66 @@ COMMAND_FILE = "C:/temp/logi_command.json"
 POSITION_FILE = "C:/temp/logi_position.json"
 BUTTON_FILE = "C:/temp/logi_button.json"
 
+# State file for ComfyUI integration (continuous reads)
+if platform.system() == "Windows":
+    STATE_FILE = "C:/temp/controller_state.json"
+else:
+    STATE_FILE = "/tmp/controller_state.json"
+
 # Ensure temp directory exists
 os.makedirs(os.path.dirname(COMMAND_FILE), exist_ok=True)
+if platform.system() != "Windows":
+    os.makedirs("/tmp", exist_ok=True)
+
+# Global controller state for ComfyUI (written to file continuously)
+controller_state = {
+    "dial_value": 0,
+    "dial_delta": 0,
+    "scroller_value": 0,
+    "scroller_delta": 0,
+    "btn_top_left": False,
+    "btn_top_right": False,
+    "btn_bottom_left": False,
+    "btn_bottom_right": False,
+    # Keypad buttons
+    "btn_1": False, "btn_2": False, "btn_3": False,
+    "btn_4": False, "btn_5": False, "btn_6": False,
+    "btn_7": False, "btn_8": False, "btn_9": False,
+    # LCXL Faders
+    "fader_1": 0.0, "fader_2": 0.0, "fader_3": 0.0, "fader_4": 0.0,
+    "fader_5": 0.0, "fader_6": 0.0, "fader_7": 0.0, "fader_8": 0.0,
+    # LCXL Knobs Row A
+    "knob_1a": 0.0, "knob_2a": 0.0, "knob_3a": 0.0, "knob_4a": 0.0,
+    "knob_5a": 0.0, "knob_6a": 0.0, "knob_7a": 0.0, "knob_8a": 0.0,
+    # LCXL Knobs Row B
+    "knob_1b": 0.0, "knob_2b": 0.0, "knob_3b": 0.0, "knob_4b": 0.0,
+    "knob_5b": 0.0, "knob_6b": 0.0, "knob_7b": 0.0, "knob_8b": 0.0,
+    # LCXL Knobs Row C
+    "knob_1c": 0.0, "knob_2c": 0.0, "knob_3c": 0.0, "knob_4c": 0.0,
+    "knob_5c": 0.0, "knob_6c": 0.0, "knob_7c": 0.0, "knob_8c": 0.0,
+    # Timestamp
+    "last_update": 0,
+}
+state_lock = threading.Lock()
+
+
+def write_state_file():
+    """Write the current controller state to file for ComfyUI."""
+    try:
+        with state_lock:
+            controller_state["last_update"] = time.time()
+            with open(STATE_FILE, 'w') as f:
+                json.dump(controller_state, f)
+    except Exception as e:
+        pass  # Silently ignore file write errors
+
+
+def update_controller_state(key, value):
+    """Update a controller state value and write to file."""
+    with state_lock:
+        controller_state[key] = value
+    write_state_file()
+
 
 # Global state for tracking slider and accumulated position
 last_slider_state = {
@@ -697,6 +757,15 @@ async def bridge_handler(request):
                             print(f"[*] Button: {button_name} {'PRESSED' if pressed else 'RELEASED'}")
                             # Write to file for ExtendScript
                             write_button_file(button_name, pressed)
+                            # Update controller state for ComfyUI
+                            state_key_map = {
+                                "TOP LEFT": "btn_top_left",
+                                "TOP RIGHT": "btn_top_right",
+                                "BOTTOM LEFT": "btn_bottom_left",
+                                "BOTTOM RIGHT": "btn_bottom_right"
+                            }
+                            if button_name in state_key_map:
+                                update_controller_state(state_key_map[button_name], pressed)
                     
                     # Handle keypad button events (ctrl: "KEYPAD", button: 1-9, state: "PRESSED"/"RELEASED")
                     elif data.get('ctrl') == 'KEYPAD':
@@ -706,6 +775,9 @@ async def bridge_handler(request):
                         print(f"[*] Keypad: {button_name} {'PRESSED' if pressed else 'RELEASED'}")
                         # Write to file for ExtendScript
                         write_button_file(button_name, pressed)
+                        # Update controller state for ComfyUI
+                        if 1 <= button_num <= 9:
+                            update_controller_state(f"btn_{button_num}", pressed)
                     
                     # Handle dial/scroller events
                     elif 'delta' in data:
@@ -714,6 +786,17 @@ async def bridge_handler(request):
                         delta = data.get('delta', 0)
                         write_command_file(delta, ctrl)
                         write_position_file(delta, ctrl)
+                        # Update controller state for ComfyUI
+                        if ctrl == 'BIG':
+                            with state_lock:
+                                controller_state["dial_value"] += delta
+                                controller_state["dial_delta"] = delta
+                            write_state_file()
+                        elif ctrl == 'SMALL':
+                            with state_lock:
+                                controller_state["scroller_value"] += delta
+                                controller_state["scroller_delta"] = delta
+                            write_state_file()
                     
                     # Handle MIDI CC events
                     elif data.get('ctrl') == 'MIDI_CC':
@@ -721,6 +804,19 @@ async def bridge_handler(request):
                         val = data.get('value', 0)
                         name = data.get('name', f'CC_{cc}')
                         print(f"[*] MIDI CC: {name} = {val}")
+                        # Update controller state for ComfyUI
+                        # Convert 0-127 to 0.0-1.0
+                        normalized = val / 127.0
+                        # Map CC to state key based on name pattern
+                        if name.startswith("FADER_"):
+                            fader_num = name.split("_")[1]
+                            update_controller_state(f"fader_{fader_num}", normalized)
+                        elif name.startswith("KNOB_"):
+                            parts = name.split("_")  # e.g., "KNOB_1_A"
+                            if len(parts) == 3:
+                                knob_num = parts[1]
+                                row = parts[2].lower()
+                                update_controller_state(f"knob_{knob_num}{row}", normalized)
                     
                     # Handle MIDI Note events
                     elif data.get('ctrl') == 'MIDI_NOTE':

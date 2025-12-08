@@ -1,0 +1,112 @@
+{
+  "last_node_id": 3,
+  "last_link_id": 0,
+  "nodes": [
+    {
+      "id": 1,
+      "type": "ControllerStateReader",
+      "pos": [100, 100],
+      "size": [320, 400],
+      "flags": {},
+      "order": 0,
+      "mode": 0,
+      "outputs": [
+        {"name": "dial_value", "type": "INT", "links": null, "slot_index": 0},
+        {"name": "dial_delta", "type": "INT", "links": null, "slot_index": 1},
+        {"name": "scroller_value", "type": "INT", "links": null, "slot_index": 2},
+        {"name": "scroller_delta", "type": "INT", "links": null, "slot_index": 3},
+        {"name": "btn_top_left", "type": "BOOLEAN", "links": null, "slot_index": 4},
+        {"name": "btn_top_right", "type": "BOOLEAN", "links": null, "slot_index": 5},
+        {"name": "btn_bottom_left", "type": "BOOLEAN", "links": null, "slot_index": 6},
+        {"name": "btn_bottom_right", "type": "BOOLEAN", "links": null, "slot_index": 7},
+        {"name": "fader_1", "type": "FLOAT", "links": null, "slot_index": 8},
+        {"name": "fader_2", "type": "FLOAT", "links": null, "slot_index": 9},
+        {"name": "fader_3", "type": "FLOAT", "links": null, "slot_index": 10},
+        {"name": "fader_4", "type": "FLOAT", "links": null, "slot_index": 11},
+        {"name": "fader_5", "type": "FLOAT", "links": null, "slot_index": 12},
+        {"name": "fader_6", "type": "FLOAT", "links": null, "slot_index": 13},
+        {"name": "fader_7", "type": "FLOAT", "links": null, "slot_index": 14},
+        {"name": "fader_8", "type": "FLOAT", "links": null, "slot_index": 15}
+      ],
+      "properties": {"Node name for S&R": "ControllerStateReader"},
+      "widgets_values": []
+    },
+    {
+      "id": 2,
+      "type": "KeypadReader",
+      "pos": [480, 100],
+      "size": [280, 300],
+      "flags": {},
+      "order": 1,
+      "mode": 0,
+      "outputs": [
+        {"name": "btn_1", "type": "BOOLEAN", "links": null, "slot_index": 0},
+        {"name": "btn_2", "type": "BOOLEAN", "links": null, "slot_index": 1},
+        {"name": "btn_3", "type": "BOOLEAN", "links": null, "slot_index": 2},
+        {"name": "btn_4", "type": "BOOLEAN", "links": null, "slot_index": 3},
+        {"name": "btn_5", "type": "BOOLEAN", "links": null, "slot_index": 4},
+        {"name": "btn_6", "type": "BOOLEAN", "links": null, "slot_index": 5},
+        {"name": "btn_7", "type": "BOOLEAN", "links": null, "slot_index": 6},
+        {"name": "btn_8", "type": "BOOLEAN", "links": null, "slot_index": 7},
+        {"name": "btn_9", "type": "BOOLEAN", "links": null, "slot_index": 8},
+        {"name": "any_pressed", "type": "BOOLEAN", "links": null, "slot_index": 9},
+        {"name": "last_pressed", "type": "INT", "links": null, "slot_index": 10}
+      ],
+      "properties": {"Node name for S&R": "KeypadReader"},
+      "widgets_values": []
+    },
+    {
+      "id": 3,
+      "type": "LCXLKnobReader",
+      "pos": [100, 560],
+      "size": [320, 580],
+      "flags": {},
+      "order": 2,
+      "mode": 0,
+      "outputs": [
+        {"name": "knob_1a", "type": "FLOAT", "links": null, "slot_index": 0},
+        {"name": "knob_2a", "type": "FLOAT", "links": null, "slot_index": 1},
+        {"name": "knob_3a", "type": "FLOAT", "links": null, "slot_index": 2},
+        {"name": "knob_4a", "type": "FLOAT", "links": null, "slot_index": 3},
+        {"name": "knob_5a", "type": "FLOAT", "links": null, "slot_index": 4},
+        {"name": "knob_6a", "type": "FLOAT", "links": null, "slot_index": 5},
+        {"name": "knob_7a", "type": "FLOAT", "links": null, "slot_index": 6},
+        {"name": "knob_8a", "type": "FLOAT", "links": null, "slot_index": 7},
+        {"name": "knob_1b", "type": "FLOAT", "links": null, "slot_index": 8},
+        {"name": "knob_2b", "type": "FLOAT", "links": null, "slot_index": 9},
+        {"name": "knob_3b", "type": "FLOAT", "links": null, "slot_index": 10},
+        {"name": "knob_4b", "type": "FLOAT", "links": null, "slot_index": 11},
+        {"name": "knob_5b", "type": "FLOAT", "links": null, "slot_index": 12},
+        {"name": "knob_6b", "type": "FLOAT", "links": null, "slot_index": 13},
+        {"name": "knob_7b", "type": "FLOAT", "links": null, "slot_index": 14},
+        {"name": "knob_8b", "type": "FLOAT", "links": null, "slot_index": 15},
+        {"name": "knob_1c", "type": "FLOAT", "links": null, "slot_index": 16},
+        {"name": "knob_2c", "type": "FLOAT", "links": null, "slot_index": 17},
+        {"name": "knob_3c", "type": "FLOAT", "links": null, "slot_index": 18},
+        {"name": "knob_4c", "type": "FLOAT", "links": null, "slot_index": 19},
+        {"name": "knob_5c", "type": "FLOAT", "links": null, "slot_index": 20},
+        {"name": "knob_6c", "type": "FLOAT", "links": null, "slot_index": 21},
+        {"name": "knob_7c", "type": "FLOAT", "links": null, "slot_index": 22},
+        {"name": "knob_8c", "type": "FLOAT", "links": null, "slot_index": 23}
+      ],
+      "properties": {"Node name for S&R": "LCXLKnobReader"},
+      "widgets_values": []
+    }
+  ],
+  "links": [],
+  "groups": [
+    {
+      "title": "Controller Inputs - Enable Auto Queue for real-time updates",
+      "bounding": [80, 40, 720, 1120],
+      "color": "#3f789e"
+    }
+  ],
+  "config": {},
+  "extra": {
+    "ds": {
+      "scale": 0.8,
+      "offset": [50, 30]
+    }
+  },
+  "version": 0.4
+}

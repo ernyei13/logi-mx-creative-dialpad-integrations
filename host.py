@@ -37,6 +37,7 @@ import asyncio
 import threading
 import json
 import webbrowser
+import platform
 from aiohttp import ClientSession
 
 # ==============================================================================
