@@ -10,6 +10,7 @@ WEB_PORT = 8080
 COMMAND_FILE = "C:/temp/logi_command.json"
 POSITION_FILE = "C:/temp/logi_position.json"
 BUTTON_FILE = "C:/temp/logi_button.json"
+HEARTBEAT_FILE = "C:/temp/webserver_heartbeat.json"
 
 # State file for ComfyUI integration (continuous reads)
 if platform.system() == "Windows":
@@ -59,23 +60,68 @@ controller_state = {
 }
 state_lock = threading.Lock()
 
+# Throttle file writes to reduce I/O
+last_file_write = 0
+FILE_WRITE_INTERVAL = 0.016  # ~60fps max file write rate
+state_dirty = False
 
-def write_state_file():
-    """Write the current controller state to file for ComfyUI."""
+
+def write_state_file_now():
+    """Immediately write state file."""
+    global last_file_write
     try:
         with state_lock:
             controller_state["last_update"] = time.time()
             with open(STATE_FILE, 'w') as f:
                 json.dump(controller_state, f)
+        last_file_write = time.time()
+        # Update heartbeat file alongside state
+        try:
+            data = {"ts": time.time()}
+            tmp = HEARTBEAT_FILE + ".tmp"
+            with open(tmp, 'w') as hf:
+                json.dump(data, hf)
+            os.replace(tmp, HEARTBEAT_FILE)
+        except Exception:
+            pass
     except Exception as e:
-        pass  # Silently ignore file write errors
+        pass
+
+
+def write_state_file_throttled():
+    """Write state file if dirty and enough time has passed."""
+    global last_file_write, state_dirty
+    
+    if not state_dirty:
+        return
+    
+    now = time.time()
+    if now - last_file_write < FILE_WRITE_INTERVAL:
+        return
+    
+    write_state_file_now()
+    state_dirty = False
+
+
+def write_state_file():
+    """Write the current controller state to file."""
+    global state_dirty
+    state_dirty = True
+    # Always write immediately for responsiveness
+    write_state_file_now()
 
 
 def update_controller_state(key, value):
     """Update a controller state value and write to file."""
+    global state_dirty
     with state_lock:
-        controller_state[key] = value
-    write_state_file()
+        if controller_state.get(key) != value:
+            controller_state[key] = value
+            state_dirty = True
+    # Write immediately for MIDI responsiveness
+    if state_dirty:
+        write_state_file_now()
+        state_dirty = False
 
 
 # Global state for tracking slider and accumulated position
@@ -124,8 +170,18 @@ def write_position_file(delta, ctrl="BIG"):
         else:
             accumulated_position["y"] += delta
         
-        with open(POSITION_FILE, 'w') as f:
-            json.dump(accumulated_position, f)
+        # Write atomically with timestamp
+        out = dict(accumulated_position)
+        out["_ts"] = time.time()
+        tmp = POSITION_FILE + ".tmp"
+        with open(tmp, 'w') as f:
+            json.dump(out, f)
+        try:
+            os.replace(tmp, POSITION_FILE)
+        except Exception:
+            # fallback
+            with open(POSITION_FILE, 'w') as f:
+                json.dump(out, f)
         print(f"[*] Position: x={accumulated_position['x']}, y={accumulated_position['y']}")
     except Exception as e:
         print(f"[!] Error writing position file: {e}")
@@ -137,10 +193,17 @@ def write_button_file(button_name, pressed):
         btn_data = {
             "button": button_name,
             "pressed": pressed,
-            "timestamp": time.time()
+            "timestamp": time.time(),
+            "_ts": time.time()
         }
-        with open(BUTTON_FILE, 'w') as f:
+        tmp = BUTTON_FILE + ".tmp"
+        with open(tmp, 'w') as f:
             json.dump(btn_data, f)
+        try:
+            os.replace(tmp, BUTTON_FILE)
+        except Exception:
+            with open(BUTTON_FILE, 'w') as f:
+                json.dump(btn_data, f)
     except Exception as e:
         print(f"[!] Error writing button file: {e}")
 
@@ -811,18 +874,18 @@ async def bridge_handler(request):
                         name = data.get('name', f'CC_{cc}')
                         print(f"[*] MIDI CC: {name} = {val}")
                         # Update controller state for ComfyUI
-                        # Convert 0-127 to 0.0-1.0
-                        normalized = val / 127.0
+                        # Convert 0-127 to 0.0-100.0
+                        normalized = (val / 127.0) * 100.0
                         # Map CC to state key based on name pattern
                         if name.startswith("FADER_"):
                             fader_num = name.split("_")[1]
                             update_controller_state(f"fader_{fader_num}", normalized)
                         elif name.startswith("KNOB_"):
-                            parts = name.split("_")  # e.g., "KNOB_1_A"
-                            if len(parts) == 3:
-                                knob_num = parts[1]
-                                row = parts[2].lower()
-                                update_controller_state(f"knob_{knob_num}{row}", normalized)
+                            # Format is "KNOB_1A" - extract number and letter
+                            suffix = name.split("_")[1]  # e.g., "1A"
+                            knob_num = suffix[:-1]  # e.g., "1"
+                            row = suffix[-1].lower()  # e.g., "a"
+                            update_controller_state(f"knob_{knob_num}{row}", normalized)
                     
                     # Handle MIDI Note events (LCXL buttons)
                     elif data.get('ctrl') == 'MIDI_NOTE':
@@ -831,6 +894,16 @@ async def bridge_handler(request):
                         name = data.get('name', f'Note_{note}')
                         pressed = (state == 'ON')
                         print(f"[*] MIDI Note: {name} = {state}")
+                        # Map certain raw note numbers to auxiliary toggles for AE
+                        try:
+                            if name.startswith('Note_'):
+                                note_num = int(name.split('_')[1])
+                                # Map Note 105-108 to aux_1..aux_4
+                                aux_map = {105: 'aux_1', 106: 'aux_2', 107: 'aux_3', 108: 'aux_4'}
+                                if note_num in aux_map:
+                                    update_controller_state(aux_map[note_num], pressed)
+                        except Exception:
+                            pass
                         # Update controller state for ComfyUI
                         # BTN_FOCUS_1 through BTN_FOCUS_8, BTN_CTRL_1 through BTN_CTRL_8
                         if name.startswith("BTN_FOCUS_"):
@@ -867,7 +940,18 @@ async def index_handler(request):
     return web.Response(text=HTML_CONTENT, content_type='text/html')
 
 
+def state_flush_thread():
+    """Background thread that periodically flushes dirty state to file."""
+    while True:
+        time.sleep(0.016)  # ~60fps
+        write_state_file_throttled()
+
+
 def start_app():
+    # Start background state flush thread
+    flush_thread = threading.Thread(target=state_flush_thread, daemon=True)
+    flush_thread.start()
+    
     app = web.Application()
     app.add_routes([
         web.get('/', index_handler),

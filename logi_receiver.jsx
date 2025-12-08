@@ -35,13 +35,31 @@ if (typeof JSON === 'undefined') {
     var POSITION_FILE = "C:/temp/logi_position.json";
     var BUTTON_FILE = "C:/temp/logi_button.json";
     
-    // --- PATH SETUP ---
-    // Calculates path relative to where this script is saved
-    // Target: ScriptUI Panels/logi-mx-creative-dialpad-integrations/
+    // Calculate script path first (used for repo fallback candidate)
     var scriptFile = new File($.fileName);
-    // Use fsName directly (native Windows backslash paths) - this is what File.execute() needs
     var parentFolder = scriptFile.parent.fsName;
     var SCRIPT_PATH = parentFolder + "\\logi-mx-creative-dialpad-integrations";
+
+    // Fallback candidate folders (will try in order)
+    var fallbackCandidates = [];
+    try {
+        if ($.getenv) {
+            var envTemp = $.getenv("TEMP");
+            if (envTemp) fallbackCandidates.push(envTemp.replace(/\\/g, "/"));
+        }
+    } catch (e) {}
+    // Add common locations
+    fallbackCandidates.push("C:/temp");
+    // Repo example temps (relative to script file)
+    try {
+        var repoExample = scriptFile.parent.fsName + "/../example_temps";
+        fallbackCandidates.push(repoExample);
+    } catch (e) {}
+    // Normalize candidates
+    for (var _i = 0; _i < fallbackCandidates.length; _i++) {
+        fallbackCandidates[_i] = fallbackCandidates[_i].replace(/\\\\/g, "/");
+    }
+    
     
     // State
     var isActive = false;
@@ -54,6 +72,11 @@ if (typeof JSON === 'undefined') {
     var lastButtonTimestamp = 0;  // Track button events to avoid duplicates
     var mappingsCache = {};  // In-memory cache: { "EffectName": { buttons: {...} }, ... }
     var isLoadingMappings = false;  // Flag to prevent auto-save while loading
+    // Debug traces
+    var lastRawPositionContent = "";
+    var lastRawButtonContent = "";
+    var verboseDebug = false;
+    var lastPositionTS = 0;
     
     // Build UI - support both dockable panel and floating window
     function buildUI(thisObj) {
@@ -102,6 +125,51 @@ if (typeof JSON === 'undefined') {
     valDisplayGroup.add("statictext", undefined, "Value:");
     var valDisplay = valDisplayGroup.add("statictext", undefined, "---");
     valDisplay.characters = 15;
+
+    // Heartbeat display to confirm scheduled polling is running
+    var heartbeatText = statusPanel.add("statictext", undefined, "HB: n/a");
+    heartbeatText.characters = 30;
+
+    // Debug display (collapsed unless verbose enabled)
+    var debugGroup = statusPanel.add("group");
+    debugGroup.orientation = "column";
+    debugGroup.alignment = ["fill", "top"];
+    var verboseCb = debugGroup.add("checkbox", undefined, "Verbose Debug");
+    verboseCb.value = false;
+    var posExistsText = debugGroup.add("statictext", undefined, "pos file: (unknown)");
+    var posRawText = debugGroup.add("statictext", undefined, "pos raw: ");
+    posRawText.characters = 60;
+    var btnExistsText = debugGroup.add("statictext", undefined, "btn file: (unknown)");
+    var btnRawText = debugGroup.add("statictext", undefined, "btn raw: ");
+    btnRawText.characters = 60;
+    verboseCb.onClick = function() {
+        verboseDebug = verboseCb.value;
+        posExistsText.visible = verboseDebug;
+        posRawText.visible = verboseDebug;
+        btnExistsText.visible = verboseDebug;
+        btnRawText.visible = verboseDebug;
+    };
+    // Start hidden
+    posExistsText.visible = false;
+    posRawText.visible = false;
+    btnExistsText.visible = false;
+    btnRawText.visible = false;
+    // Manual read button to force reading files and show results
+    var manualReadBtn = debugGroup.add("button", undefined, "Read Now");
+    manualReadBtn.onClick = function() {
+        // Force a read and update UI
+        try { readPositionFile(); } catch (e) {}
+        try { readButtonFile(); } catch (e) {}
+        posExistsText.text = "pos file: " + ((lastRawPositionContent && lastRawPositionContent.length > 0) ? "present" : "(empty)");
+        posRawText.text = "pos raw: " + (lastRawPositionContent || "");
+        btnExistsText.text = "btn file: " + ((lastRawButtonContent && lastRawButtonContent.length > 0) ? "present" : "(empty)");
+        btnRawText.text = "btn raw: " + (lastRawButtonContent || "");
+        posExistsText.visible = true;
+        posRawText.visible = true;
+        btnExistsText.visible = true;
+        btnRawText.visible = true;
+        alert("Read Now:\npos=> " + (lastRawPositionContent || "(empty)") + "\nbtn=> " + (lastRawButtonContent || "(empty)"));
+    };
     
     // Effect/Property Selection
     var targetPanel = scrollContent.add("panel", undefined, "Target Effect & Property");
@@ -280,34 +348,54 @@ if (typeof JSON === 'undefined') {
      * Returns cached value if read fails or data is invalid
      */
     function readPositionFile() {
+        // Try primary path first, then fallbacks
+        lastRawPositionContent = "";
+        var triedPaths = [];
         try {
-            var file = new File(POSITION_FILE);
-            if (file.exists) {
-                file.open("r");
-                var content = file.read();
-                file.close();
-                
-                if (content && content.length > 0) {
-                    // Validate JSON structure before parsing
-                    // Must start with { and end with }
-                    content = content.replace(/^\s+|\s+$/g, ''); // trim
-                    if (content.charAt(0) !== '{' || content.charAt(content.length - 1) !== '}') {
-                        return lastValidPosition; // Corrupted, return cached
+            var tryPath = function(path) {
+                triedPaths.push(path);
+                try {
+                    var f = new File(path);
+                    if (!f.exists) return null;
+                    f.open('r');
+                    var c = f.read();
+                    f.close();
+                    lastRawPositionContent = c;
+                    if (c && c.length > 0) {
+                        c = c.replace(/^\s+|\s+$/g, '');
+                        if (c.charAt(0) !== '{' || c.charAt(c.length - 1) !== '}') return null;
+                            var parsed = JSON.parse(c);
+                            // Check timestamp to avoid reprocessing identical file contents
+                            var ts = (parsed && (parsed._ts || parsed.timestamp)) || 0;
+                            if (ts && ts === lastPositionTS) {
+                                return lastValidPosition; // unchanged
+                            }
+                            if (ts) lastPositionTS = ts;
+                            if (typeof parsed.x === 'number' && typeof parsed.y === 'number' && isFinite(parsed.x) && isFinite(parsed.y)) {
+                                lastValidPosition = parsed;
+                                return parsed;
+                            }
                     }
-                    
-                    var parsed = JSON.parse(content);
-                    
-                    // Validate parsed values are numbers
-                    if (typeof parsed.x === 'number' && typeof parsed.y === 'number' &&
-                        isFinite(parsed.x) && isFinite(parsed.y)) {
-                        lastValidPosition = parsed;
-                        return parsed;
-                    }
-                }
+                } catch (e) {}
+                return null;
+            };
+
+            // Primary
+            var res = tryPath(POSITION_FILE);
+            if (res) return res;
+
+            // Try fallbacks
+            for (var i = 0; i < fallbackCandidates.length; i++) {
+                var candidate = fallbackCandidates[i];
+                if (!candidate) continue;
+                var p = candidate.replace(/\/$/, '') + '/logi_position.json';
+                res = tryPath(p);
+                if (res) return res;
             }
-        } catch (e) {
-            // Parse error - return cached value
-        }
+
+            // If not found, mark missing
+            if (!lastRawPositionContent) lastRawPositionContent = '(missing)';
+        } catch (e) {}
         return lastValidPosition;
     }
     
@@ -316,20 +404,37 @@ if (typeof JSON === 'undefined') {
      * Returns {button: "TOP LEFT", pressed: true, timestamp: 123456} or null
      */
     function readButtonFile() {
+        // Try primary path then fallbacks
+        lastRawButtonContent = "";
         try {
-            var file = new File(BUTTON_FILE);
-            if (file.exists) {
-                file.open("r");
-                var content = file.read();
-                file.close();
-                
-                if (content && content.length > 0) {
-                    content = content.replace(/^\s+|\s+$/g, ''); // trim
-                    if (content.charAt(0) === '{' && content.charAt(content.length - 1) === '}') {
-                        return JSON.parse(content);
+            var tryPathB = function(path) {
+                try {
+                    var f = new File(path);
+                    if (!f.exists) return null;
+                    f.open('r');
+                    var c = f.read();
+                    f.close();
+                    lastRawButtonContent = c;
+                    if (c && c.length > 0) {
+                        c = c.replace(/^\s+|\s+$/g, '');
+                        if (c.charAt(0) === '{' && c.charAt(c.length - 1) === '}') {
+                            try { return JSON.parse(c); } catch (e) { return null; }
+                        }
                     }
-                }
+                } catch (e) {}
+                return null;
+            };
+
+            var r = tryPathB(BUTTON_FILE);
+            if (r) return r;
+            for (var j = 0; j < fallbackCandidates.length; j++) {
+                var cand = fallbackCandidates[j];
+                if (!cand) continue;
+                var pb = cand.replace(/\/$/, '') + '/logi_button.json';
+                r = tryPathB(pb);
+                if (r) return r;
             }
+            if (!lastRawButtonContent) lastRawButtonContent = '(missing)';
         } catch (e) {}
         return null;
     }
@@ -821,6 +926,14 @@ if (typeof JSON === 'undefined') {
      */
     function checkButtons() {
         var btnData = readButtonFile();
+        // Update debug snapshot of position file as well
+        try { readPositionFile(); } catch (e) {}
+        if (verboseDebug) {
+            posExistsText.text = "pos file: " + ((lastRawPositionContent && lastRawPositionContent.length > 0) ? "present" : "(empty)");
+            posRawText.text = "pos raw: " + (lastRawPositionContent || "");
+            btnExistsText.text = "btn file: " + ((lastRawButtonContent && lastRawButtonContent.length > 0) ? "present" : "(empty)");
+            btnRawText.text = "btn raw: " + (lastRawButtonContent || "");
+        }
         if (!btnData || !btnData.button) return;
         
         // Check if this is a new button event (by timestamp)
@@ -1061,8 +1174,20 @@ if (typeof JSON === 'undefined') {
             
             // Read dial position
             var pos = readPositionFile();
+            // Also sample button file for debug trace (does not alter flow)
+            try {
+                readButtonFile();
+            } catch (e) {}
             var dialValue = pos.x;
             var smallDialValue = pos.y;
+
+            // Update debug display if enabled
+            if (verboseDebug) {
+                posExistsText.text = "pos file: " + ((lastRawPositionContent && lastRawPositionContent.length > 0) ? "present" : "(empty)");
+                posRawText.text = "pos raw: " + (lastRawPositionContent || "");
+                btnExistsText.text = "btn file: " + ((lastRawButtonContent && lastRawButtonContent.length > 0) ? "present" : "(empty)");
+                btnRawText.text = "btn raw: " + (lastRawButtonContent || "");
+            }
             
             // Validate dial values
             if (typeof dialValue !== 'number' || !isFinite(dialValue)) {
@@ -1223,17 +1348,35 @@ if (typeof JSON === 'undefined') {
         
         statusText.text = "Active - Select effect & property, then rotate dial";
         
-        // Start polling
-        autoUpdateInterval = app.scheduleTask("$.global.logiEffectUpdate()", 50, true);
+        // Start polling using an isolated global function and store task id globally
+        try {
+            if ($.global.logi_receiver_task_id) {
+                statusText.text = "Already polling (logi).";
+            } else {
+                var id = app.scheduleTask("$.global.logiReceiverUpdate()", 33, true);
+                $.global.logi_receiver_task_id = id;
+                if (!id) alert("Failed to start polling scheduler (scheduleTask returned: " + id + ")");
+                statusText.text = "Active - polling started (id:" + id + ")";
+            }
+        } catch (e) {
+            alert("Failed to start polling: " + e.message);
+        }
     }
     
     // Make update function globally accessible
-    $.global.logiEffectUpdate = function() {
-        if (isActive) {
-            checkButtons();  // Check for button navigation
-            updateProperty();
-        }
-    };
+        $.global.logiReceiverUpdate = function() {
+            try {
+                // Update a simple heartbeat so we can confirm the scheduler runs
+                try { heartbeatText.text = "HB: " + (new Date()).toTimeString().split(' ')[0]; } catch (e) {}
+
+                if (isActive) {
+                    checkButtons();  // Check for button navigation
+                    updateProperty();
+                }
+            } catch (e) {
+                try { statusText.text = "Scheduler error: " + e.message; } catch (ee) {}
+            }
+        };
     
     /**
      * Stop polling
@@ -1245,13 +1388,13 @@ if (typeof JSON === 'undefined') {
         statusText.text = "Stopping services...";
         valDisplay.text = "---";
         
-        if (autoUpdateInterval) {
-            app.cancelTask(autoUpdateInterval);
-            autoUpdateInterval = null;
-        }
-        
-        // Always stop the webserver (it runs locally)
-        stopHostServices();
+        try {
+            if ($.global.logi_receiver_task_id) {
+                app.cancelTask($.global.logi_receiver_task_id);
+                $.global.logi_receiver_task_id = null;
+            }
+        } catch (e) {}
+        // Do not stop webserver here - let a central controller manage it
         statusText.text = "Stopped.";
     }
     
