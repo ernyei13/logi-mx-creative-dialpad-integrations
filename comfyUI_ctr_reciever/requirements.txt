@@ -1,0 +1,5 @@
+# Requirements for ComfyUI Controller Receiver Nodes
+# Install these in your ComfyUI Python environment:
+#   pip install websocket-client
+
+websocket-client>=1.6.0

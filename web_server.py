@@ -262,6 +262,113 @@ HTML_CONTENT = """
             transform: translateY(2px);
         }
 
+        /* --- MIDI CONTROLLER UI --- */
+        .midi-section {
+            margin-top: 40px;
+            padding: 20px;
+            background: var(--surface);
+            border-radius: 12px;
+            border: 1px solid #333;
+        }
+
+        .midi-section .label {
+            text-align: center;
+            margin-bottom: 15px;
+            font-size: 0.85rem;
+            color: var(--accent);
+        }
+
+        .midi-row {
+            display: flex;
+            gap: 8px;
+            justify-content: center;
+            margin-bottom: 10px;
+        }
+
+        .midi-knob {
+            width: 40px;
+            height: 40px;
+            border-radius: 50%;
+            background: conic-gradient(from 220deg, var(--accent) 0%, var(--accent) var(--pct, 0%), #333 var(--pct, 0%), #333 100%);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 0.55rem;
+            color: var(--text-dim);
+            position: relative;
+            box-shadow: inset 0 0 8px rgba(0,0,0,0.5);
+        }
+
+        .midi-knob::after {
+            content: '';
+            position: absolute;
+            width: 28px;
+            height: 28px;
+            background: #1a1a1a;
+            border-radius: 50%;
+        }
+
+        .midi-knob span {
+            position: absolute;
+            z-index: 2;
+            font-size: 0.5rem;
+        }
+
+        .midi-fader-container {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            width: 40px;
+        }
+
+        .midi-fader {
+            width: 12px;
+            height: 80px;
+            background: #222;
+            border-radius: 4px;
+            position: relative;
+            overflow: hidden;
+            box-shadow: inset 0 0 6px rgba(0,0,0,0.8);
+        }
+
+        .midi-fader-fill {
+            position: absolute;
+            bottom: 0;
+            left: 0;
+            right: 0;
+            background: linear-gradient(to top, var(--accent), #6bb3ff);
+            height: var(--pct, 0%);
+            transition: height 0.05s ease-out;
+            border-radius: 4px;
+        }
+
+        .midi-fader-label {
+            font-size: 0.5rem;
+            color: var(--text-dim);
+            margin-top: 4px;
+        }
+
+        .midi-btn {
+            width: 36px;
+            height: 24px;
+            background: linear-gradient(145deg, #1a1a1a, #0f0f0f);
+            border: 1px solid #333;
+            border-radius: 4px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 0.45rem;
+            color: var(--text-dim);
+            transition: all 0.1s ease;
+        }
+
+        .midi-btn.on {
+            background: var(--accent);
+            border-color: var(--accent);
+            color: #fff;
+            box-shadow: 0 0 10px rgba(59, 130, 246, 0.5);
+        }
+
     </style>
 </head>
 <body>
@@ -319,6 +426,107 @@ HTML_CONTENT = """
             <div class="meta">
                 <div class="label">Scroll</div>
                 <div class="value" id="val-small">0</div>
+            </div>
+        </div>
+    </div>
+
+    <!-- MIDI Controller Section -->
+    <div class="midi-section" id="midi-section">
+        <div class="label">Launch Control XL</div>
+        
+        <!-- Row A: Send A Knobs (CC 13-20) -->
+        <div class="midi-row" id="midi-row-a">
+            <div class="midi-knob" id="midi-cc-13" data-cc="13"><span>1A</span></div>
+            <div class="midi-knob" id="midi-cc-14" data-cc="14"><span>2A</span></div>
+            <div class="midi-knob" id="midi-cc-15" data-cc="15"><span>3A</span></div>
+            <div class="midi-knob" id="midi-cc-16" data-cc="16"><span>4A</span></div>
+            <div class="midi-knob" id="midi-cc-17" data-cc="17"><span>5A</span></div>
+            <div class="midi-knob" id="midi-cc-18" data-cc="18"><span>6A</span></div>
+            <div class="midi-knob" id="midi-cc-19" data-cc="19"><span>7A</span></div>
+            <div class="midi-knob" id="midi-cc-20" data-cc="20"><span>8A</span></div>
+        </div>
+        
+        <!-- Row B: Send B Knobs (CC 29-36) -->
+        <div class="midi-row" id="midi-row-b">
+            <div class="midi-knob" id="midi-cc-29" data-cc="29"><span>1B</span></div>
+            <div class="midi-knob" id="midi-cc-30" data-cc="30"><span>2B</span></div>
+            <div class="midi-knob" id="midi-cc-31" data-cc="31"><span>3B</span></div>
+            <div class="midi-knob" id="midi-cc-32" data-cc="32"><span>4B</span></div>
+            <div class="midi-knob" id="midi-cc-33" data-cc="33"><span>5B</span></div>
+            <div class="midi-knob" id="midi-cc-34" data-cc="34"><span>6B</span></div>
+            <div class="midi-knob" id="midi-cc-35" data-cc="35"><span>7B</span></div>
+            <div class="midi-knob" id="midi-cc-36" data-cc="36"><span>8B</span></div>
+        </div>
+        
+        <!-- Row C: Pan Knobs (CC 49-56) -->
+        <div class="midi-row" id="midi-row-c">
+            <div class="midi-knob" id="midi-cc-49" data-cc="49"><span>1C</span></div>
+            <div class="midi-knob" id="midi-cc-50" data-cc="50"><span>2C</span></div>
+            <div class="midi-knob" id="midi-cc-51" data-cc="51"><span>3C</span></div>
+            <div class="midi-knob" id="midi-cc-52" data-cc="52"><span>4C</span></div>
+            <div class="midi-knob" id="midi-cc-53" data-cc="53"><span>5C</span></div>
+            <div class="midi-knob" id="midi-cc-54" data-cc="54"><span>6C</span></div>
+            <div class="midi-knob" id="midi-cc-55" data-cc="55"><span>7C</span></div>
+            <div class="midi-knob" id="midi-cc-56" data-cc="56"><span>8C</span></div>
+        </div>
+        
+        <!-- Track Focus Buttons (Notes 41-44, 57-60) -->
+        <div class="midi-row">
+            <div class="midi-btn" id="midi-note-41">F1</div>
+            <div class="midi-btn" id="midi-note-42">F2</div>
+            <div class="midi-btn" id="midi-note-43">F3</div>
+            <div class="midi-btn" id="midi-note-44">F4</div>
+            <div class="midi-btn" id="midi-note-57">F5</div>
+            <div class="midi-btn" id="midi-note-58">F6</div>
+            <div class="midi-btn" id="midi-note-59">F7</div>
+            <div class="midi-btn" id="midi-note-60">F8</div>
+        </div>
+        
+        <!-- Track Control Buttons (Notes 73-76, 89-92) -->
+        <div class="midi-row">
+            <div class="midi-btn" id="midi-note-73">C1</div>
+            <div class="midi-btn" id="midi-note-74">C2</div>
+            <div class="midi-btn" id="midi-note-75">C3</div>
+            <div class="midi-btn" id="midi-note-76">C4</div>
+            <div class="midi-btn" id="midi-note-89">C5</div>
+            <div class="midi-btn" id="midi-note-90">C6</div>
+            <div class="midi-btn" id="midi-note-91">C7</div>
+            <div class="midi-btn" id="midi-note-92">C8</div>
+        </div>
+        
+        <!-- Faders (CC 77-84) -->
+        <div class="midi-row" style="margin-top: 15px;">
+            <div class="midi-fader-container">
+                <div class="midi-fader" id="midi-cc-77"><div class="midi-fader-fill"></div></div>
+                <div class="midi-fader-label">1</div>
+            </div>
+            <div class="midi-fader-container">
+                <div class="midi-fader" id="midi-cc-78"><div class="midi-fader-fill"></div></div>
+                <div class="midi-fader-label">2</div>
+            </div>
+            <div class="midi-fader-container">
+                <div class="midi-fader" id="midi-cc-79"><div class="midi-fader-fill"></div></div>
+                <div class="midi-fader-label">3</div>
+            </div>
+            <div class="midi-fader-container">
+                <div class="midi-fader" id="midi-cc-80"><div class="midi-fader-fill"></div></div>
+                <div class="midi-fader-label">4</div>
+            </div>
+            <div class="midi-fader-container">
+                <div class="midi-fader" id="midi-cc-81"><div class="midi-fader-fill"></div></div>
+                <div class="midi-fader-label">5</div>
+            </div>
+            <div class="midi-fader-container">
+                <div class="midi-fader" id="midi-cc-82"><div class="midi-fader-fill"></div></div>
+                <div class="midi-fader-label">6</div>
+            </div>
+            <div class="midi-fader-container">
+                <div class="midi-fader" id="midi-cc-83"><div class="midi-fader-fill"></div></div>
+                <div class="midi-fader-label">7</div>
+            </div>
+            <div class="midi-fader-container">
+                <div class="midi-fader" id="midi-cc-84"><div class="midi-fader-fill"></div></div>
+                <div class="midi-fader-label">8</div>
             </div>
         </div>
     </div>
@@ -400,6 +608,34 @@ HTML_CONTENT = """
                     }
                 }
             }
+            // Handle MIDI CC events (knobs and faders)
+            else if (data.ctrl === "MIDI_CC") {
+                const cc = data.cc;
+                const pct = data.normalized;
+                const el = document.getElementById('midi-cc-' + cc);
+                if (el) {
+                    if (el.classList.contains('midi-fader')) {
+                        // Fader: set fill height
+                        const fill = el.querySelector('.midi-fader-fill');
+                        if (fill) fill.style.setProperty('--pct', pct + '%');
+                    } else {
+                        // Knob: set conic gradient percentage
+                        el.style.setProperty('--pct', (pct * 2.8) + 'deg'); // 280deg sweep
+                    }
+                }
+            }
+            // Handle MIDI Note events (buttons)
+            else if (data.ctrl === "MIDI_NOTE") {
+                const note = data.note;
+                const el = document.getElementById('midi-note-' + note);
+                if (el) {
+                    if (data.state === "ON") {
+                        el.classList.add('on');
+                    } else {
+                        el.classList.remove('on');
+                    }
+                }
+            }
         };
 
         ws.onopen = () => console.log("Connected to Python Bridge");
@@ -478,6 +714,20 @@ async def bridge_handler(request):
                         delta = data.get('delta', 0)
                         write_command_file(delta, ctrl)
                         write_position_file(delta, ctrl)
+                    
+                    # Handle MIDI CC events
+                    elif data.get('ctrl') == 'MIDI_CC':
+                        cc = data.get('cc', 0)
+                        val = data.get('value', 0)
+                        name = data.get('name', f'CC_{cc}')
+                        print(f"[*] MIDI CC: {name} = {val}")
+                    
+                    # Handle MIDI Note events
+                    elif data.get('ctrl') == 'MIDI_NOTE':
+                        note = data.get('note', 0)
+                        state = data.get('state', 'OFF')
+                        name = data.get('name', f'Note_{note}')
+                        print(f"[*] MIDI Note: {name} = {state}")
                 except:
                     pass
                 # Relay to any connected browser clients
